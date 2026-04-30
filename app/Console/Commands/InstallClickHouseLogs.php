@@ -37,7 +37,7 @@ class InstallClickHouseLogs extends Command
     private function schemaSql(): string
     {
         $ttlDays = (int) config('fivebucket.logs.clickhouse.ttl_days', 90);
-        $ttl = $ttlDays > 0 ? "\nTTL created_at + INTERVAL {$ttlDays} DAY" : '';
+        $ttl = $ttlDays > 0 ? "\nTTL toDateTime(created_at) + INTERVAL {$ttlDays} DAY" : '';
 
         return <<<SQL
 CREATE TABLE IF NOT EXISTS {$this->clickHouseTable()} (
