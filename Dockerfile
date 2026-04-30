@@ -12,31 +12,7 @@ COPY vite.config.js postcss.config.js tailwind.config.js jsconfig.json ./
 RUN npm run build
 
 
-FROM composer:2 AS vendor
-WORKDIR /app
-
-COPY composer.json composer.lock ./
-RUN composer install \
-    --no-dev \
-    --prefer-dist \
-    --no-interaction \
-    --no-progress \
-    --no-scripts \
-    --no-autoloader
-
-COPY app ./app
-COPY bootstrap ./bootstrap
-COPY config ./config
-COPY database ./database
-COPY routes ./routes
-COPY artisan ./artisan
-
-RUN mkdir -p storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs bootstrap/cache \
-    && composer dump-autoload --optimize --no-dev \
-    && php artisan package:discover --ansi
-
-
-FROM php:8.2-fpm-alpine AS app
+FROM php:8.2-fpm-alpine AS php-base
 WORKDIR /var/www/html
 
 RUN apk add --no-cache \
@@ -65,6 +41,36 @@ RUN apk add --no-cache \
     && pecl install redis \
     && docker-php-ext-enable redis \
     && apk del .build-deps
+
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+
+FROM php-base AS vendor
+WORKDIR /app
+
+COPY composer.json composer.lock ./
+RUN composer install \
+    --no-dev \
+    --prefer-dist \
+    --no-interaction \
+    --no-progress \
+    --no-scripts \
+    --no-autoloader
+
+COPY app ./app
+COPY bootstrap ./bootstrap
+COPY config ./config
+COPY database ./database
+COPY routes ./routes
+COPY artisan ./artisan
+
+RUN mkdir -p storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs bootstrap/cache \
+    && composer dump-autoload --optimize --no-dev \
+    && php artisan package:discover --ansi
+
+
+FROM php-base AS app
+WORKDIR /var/www/html
 
 COPY docker/php/php.ini /usr/local/etc/php/conf.d/99-fivebucket.ini
 COPY docker/php/entrypoint.sh /usr/local/bin/fivebucket-entrypoint
