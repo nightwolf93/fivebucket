@@ -140,3 +140,26 @@ The webhook endpoint is:
 npm run build
 php artisan test
 ```
+
+## Docker Deployment
+
+Production Docker files are included:
+
+- `Dockerfile`
+- `docker-compose.yml`
+- `.env.docker.example`
+- `docker/nginx/default.conf`
+- `docker/php/entrypoint.sh`
+- `docker/php/php.ini`
+
+Quick start:
+
+```bash
+cp .env.docker.example .env.production
+docker run --rm php:8.2-cli-alpine php -r "echo 'base64:'.base64_encode(random_bytes(32)).PHP_EOL;"
+docker compose --env-file .env.production up -d --build
+```
+
+Fill `.env.production` with the generated `APP_KEY`, R2 credentials, Stripe credentials, and your production domain before exposing the service.
+
+See `docs/deployment.md` for the full deployment flow.

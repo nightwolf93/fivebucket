@@ -1,0 +1,126 @@
+name: fivebucket
+
+services:
+  app:
+    image: fivebucket-app:latest
+    build:
+      context: .
+      target: app
+    env_file:
+      - ${FIVEBUCKET_ENV_FILE:-.env.docker.example}
+    environment:
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-true}
+      RUN_SEEDERS: ${RUN_SEEDERS:-true}
+      RUN_CLICKHOUSE_MIGRATIONS: ${RUN_CLICKHOUSE_MIGRATIONS:-true}
+      WAIT_FOR_SERVICES: ${WAIT_FOR_SERVICES:-true}
+      LARAVEL_CONFIG_CACHE: ${LARAVEL_CONFIG_CACHE:-true}
+    volumes:
+      - fivebucket-storage:/var/www/html/storage
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    restart: unless-stopped
+
+  queue:
+    image: fivebucket-app:latest
+    env_file:
+      - ${FIVEBUCKET_ENV_FILE:-.env.docker.example}
+    environment:
+      RUN_MIGRATIONS: "false"
+      RUN_SEEDERS: "false"
+      RUN_CLICKHOUSE_MIGRATIONS: "false"
+      WAIT_FOR_SERVICES: ${WAIT_FOR_SERVICES:-true}
+      LARAVEL_CONFIG_CACHE: ${LARAVEL_CONFIG_CACHE:-true}
+    command: php artisan queue:work redis --sleep=3 --tries=3 --timeout=120
+    volumes:
+      - fivebucket-storage:/var/www/html/storage
+    depends_on:
+      app:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  scheduler:
+    image: fivebucket-app:latest
+    env_file:
+      - ${FIVEBUCKET_ENV_FILE:-.env.docker.example}
+    environment:
+      RUN_MIGRATIONS: "false"
+      RUN_SEEDERS: "false"
+      RUN_CLICKHOUSE_MIGRATIONS: "false"
+      WAIT_FOR_SERVICES: ${WAIT_FOR_SERVICES:-true}
+      LARAVEL_CONFIG_CACHE: ${LARAVEL_CONFIG_CACHE:-true}
+    command: sh -c "while true; do php artisan schedule:run --verbose --no-interaction; sleep 60; done"
+    volumes:
+      - fivebucket-storage:/var/www/html/storage
+    depends_on:
+      app:
+        condition: service_started
+    restart: unless-stopped
+
+  nginx:
+    image: fivebucket-nginx:latest
+    build:
+      context: .
+      target: nginx
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+    depends_on:
+      app:
+        condition: service_started
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-fivebucket}
+      MYSQL_USER: ${MYSQL_USER:-fivebucket}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-change_me_db}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-change_me_root}
+    volumes:
+      - fivebucket-mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-change_me_root}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - fivebucket-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.12-alpine
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DATABASE:-default}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USERNAME:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-change_me_clickhouse}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    volumes:
+      - fivebucket-clickhouse:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:8123/ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  fivebucket-storage:
+  fivebucket-mysql:
+  fivebucket-redis:
+  fivebucket-clickhouse:
