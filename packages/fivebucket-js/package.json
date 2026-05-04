@@ -1,0 +1,25 @@
+{
+  "name": "@fivebucket/sdk",
+  "version": "0.1.0",
+  "description": "Official FiveBucket JavaScript and TypeScript SDK for FiveM servers, Node.js tools and browser upload flows.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  },
+  "license": "MIT"
+}

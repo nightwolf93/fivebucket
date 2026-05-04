@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Admin\AccountController;
 use App\Http\Controllers\ApiTokenController;
+use App\Http\Controllers\AssetController;
 use App\Http\Controllers\BillingController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\LogAlertRuleController;
@@ -30,6 +31,7 @@ Route::get('/', function (): RedirectResponse {
     return redirect()->route(auth()->check() ? 'dashboard' : 'login');
 });
 
+Route::get('/asset/{mediaFile:public_id}', [AssetController::class, 'show'])->name('assets.show');
 Route::get('/docs', fn () => Inertia::render('Docs'))->name('docs');
 
 Route::get('/dashboard', [DashboardController::class, 'index'])->middleware(['auth', 'verified'])->name('dashboard');
@@ -41,6 +43,8 @@ Route::middleware('auth')->group(function () {
     Route::delete('/api-tokens/{apiToken}', [ApiTokenController::class, 'destroy'])->name('api-tokens.destroy');
     Route::get('/media', [MediaController::class, 'index'])->name('media.index');
     Route::post('/media', [MediaController::class, 'store'])->name('media.store');
+    Route::patch('/media/{mediaFile}', [MediaController::class, 'update'])->name('media.update');
+    Route::get('/media/{mediaFile}/signed-url', [MediaController::class, 'signedUrl'])->name('media.signed-url');
     Route::delete('/media/{mediaFile}', [MediaController::class, 'destroy'])->name('media.destroy');
     Route::get('/logs', [LogDashboardController::class, 'index'])->name('logs.index');
     Route::get('/logs/export', [LogDashboardController::class, 'export'])->name('logs.export');
@@ -62,6 +66,8 @@ Route::middleware('auth')->group(function () {
     Route::patch('/settings', [TeamSettingsController::class, 'update'])->name('settings.update');
     Route::post('/billing/checkout', [BillingController::class, 'checkout'])->name('billing.checkout');
     Route::post('/billing/portal', [BillingController::class, 'portal'])->name('billing.portal');
+    Route::get('/billing/usage', [BillingController::class, 'usage'])->name('billing.usage');
+    Route::patch('/billing/usage', [BillingController::class, 'updateUsage'])->name('billing.usage.update');
 
     Route::middleware('admin')->prefix('admin')->name('admin.')->group(function () {
         Route::get('/accounts', [AccountController::class, 'index'])->name('accounts.index');

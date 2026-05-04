@@ -20,8 +20,7 @@ class MediaChanged implements ShouldBroadcastNow
         private readonly string $action,
         private readonly ?array $file = null,
         private readonly ?array $deleted = null,
-    ) {
-    }
+    ) {}
 
     public static function created(MediaFile $file, Team $team): self
     {
@@ -35,6 +34,13 @@ class MediaChanged implements ShouldBroadcastNow
             'size' => ByteFormatter::human($file->size_bytes),
             'sizeBytes' => $file->size_bytes,
             'url' => $file->deliveryUrl($team),
+            'assetUrl' => $file->assetUrl(),
+            'variantUrl' => $file->type === 'image'
+                ? ($file->isPrivate() ? $file->signedUrl(query: ['w' => 512, 'q' => 80, 'format' => 'webp']) : $file->variantUrl(width: 512, quality: 80))
+                : null,
+            'signedUrl' => $file->isPrivate() ? $file->signedUrl() : null,
+            'visibility' => $file->visibility ?? 'public',
+            'contentHash' => $file->content_hash,
             'metadata' => $file->metadata ?? [],
             'createdAt' => $file->created_at?->diffForHumans(),
         ]);

@@ -16,9 +16,7 @@ use Throwable;
 
 class FileController extends Controller
 {
-    public function __construct(private readonly FiveBucketStorage $storage)
-    {
-    }
+    public function __construct(private readonly FiveBucketStorage $storage) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -28,6 +26,7 @@ class FileController extends Controller
             $page = max((int) $request->query('page', 1), 1);
 
             $query = MediaFile::query()
+                ->with('team')
                 ->where('team_id', $team->id)
                 ->latest();
 
@@ -138,6 +137,34 @@ class FileController extends Controller
         });
     }
 
+    public function signedUrl(Request $request, string $path): JsonResponse
+    {
+        return $this->execute(function () use ($request, $path) {
+            $file = $this->storage->findForTeam($this->team($request), $path);
+
+            if (! $file) {
+                return $this->error('File not found.', 404);
+            }
+
+            $file->loadMissing('team');
+
+            $expires = max(60, min(604800, (int) $request->query('expires', 900)));
+            $query = array_filter([
+                'w' => $request->query('w'),
+                'h' => $request->query('h'),
+                'q' => $request->query('q'),
+                'format' => $request->query('format'),
+            ], fn ($value) => $value !== null && $value !== '');
+
+            return $this->ok([
+                'data' => [
+                    'signedUrl' => $file->signedUrl($expires, $query),
+                    'expiresIn' => $expires,
+                ],
+            ]);
+        });
+    }
+
     public function show(Request $request, string $path): JsonResponse
     {
         return $this->execute(function () use ($request, $path) {
@@ -146,6 +173,8 @@ class FileController extends Controller
             if (! $file) {
                 return $this->error('File not found.', 404);
             }
+
+            $file->loadMissing('team');
 
             return $this->ok(['data' => $file->compatibilityPayload()]);
         });
@@ -182,6 +211,7 @@ class FileController extends Controller
             'metadata' => $request->input('metadata'),
             'retentionExempt' => $request->input('retentionExempt'),
             'retention_exempt' => $request->input('retention_exempt'),
+            'visibility' => $request->input('visibility') ?: (filter_var($request->input('private'), FILTER_VALIDATE_BOOLEAN) ? 'private' : 'public'),
         ];
     }
 
@@ -197,10 +227,11 @@ class FileController extends Controller
 
     private function uploadPayload(MediaFile $file): array
     {
+        $file->loadMissing('team');
+
         return [
-            'id' => $file->public_id,
-            'url' => $file->url,
-            'originalUrl' => $file->original_url ?? $file->url,
+            ...$file->compatibilityPayload(),
+            'duplicate' => ! $file->wasRecentlyCreated,
         ];
     }
 

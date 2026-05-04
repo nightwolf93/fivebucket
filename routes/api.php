@@ -28,6 +28,7 @@ Route::prefix('v3')->group(function () {
         Route::post('/file', [FileController::class, 'uploadMultipart']);
         Route::post('/file/base64', [FileController::class, 'uploadBase64']);
         Route::get('/file/presigned-url', [FileController::class, 'createPresignedUrl']);
+        Route::get('/file/{path}/signed-url', [FileController::class, 'signedUrl'])->where('path', '.*');
         Route::get('/file/{path}', [FileController::class, 'show'])->where('path', '.*');
         Route::delete('/file/{path}', [FileController::class, 'destroy'])->where('path', '.*');
     });

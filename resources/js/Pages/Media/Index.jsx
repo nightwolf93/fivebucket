@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/Components/ui/card';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, Link, router, useForm, usePage } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
-import { Archive, FileAudio, FileBox, FileVideo, Image, Search, Trash2, UploadCloud } from 'lucide-react';
+import { Archive, Eye, FileAudio, FileBox, FileVideo, Image, Lock, Search, Trash2, Unlock, UploadCloud, Wand2 } from 'lucide-react';
 
 const typeIcons = {
     image: Image,
@@ -27,6 +27,7 @@ export default function MediaIndex({ auth, filters, team, summary, files }) {
         path: '',
         metadata: '',
         retention_exempt: false,
+        visibility: 'public',
     });
 
     useEffect(() => {
@@ -193,6 +194,21 @@ export default function MediaIndex({ auth, filters, team, summary, files }) {
                                     Retention exempt
                                 </label>
 
+                                <Field label="Visibility">
+                                    <div className="fb-segmented w-full">
+                                        {['public', 'private'].map((visibility) => (
+                                            <button
+                                                key={visibility}
+                                                type="button"
+                                                onClick={() => uploadForm.setData('visibility', visibility)}
+                                                className={uploadForm.data.visibility === visibility ? 'active' : ''}
+                                            >
+                                                {visibility}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </Field>
+
                                 <Button type="submit" disabled={uploadForm.processing || uploadForm.data.uploads.length === 0}>
                                     <UploadCloud className="h-4 w-4" />
                                     Upload media
@@ -292,18 +308,44 @@ function matchesMediaFilters(file, filters) {
 
 function AssetCard({ file }) {
     const Icon = typeIcons[file.type] ?? FileBox;
+    const [signedState, setSignedState] = useState({ loading: false, url: file.signedUrl || '' });
+    const previewUrl = file.signedUrl || file.url;
+
+    const copySignedUrl = async () => {
+        if (!file.signedUrlEndpoint) return;
+
+        setSignedState((current) => ({ ...current, loading: true }));
+
+        try {
+            const response = await window.axios.get(file.signedUrlEndpoint);
+            const url = response.data?.url;
+
+            if (url) {
+                setSignedState({ loading: false, url });
+                await navigator.clipboard?.writeText(url);
+            }
+        } catch {
+            setSignedState((current) => ({ ...current, loading: false }));
+        }
+    };
+
+    const toggleVisibility = () => {
+        router.patch(route('media.update', file.id), {
+            visibility: file.visibility === 'private' ? 'public' : 'private',
+        }, { preserveScroll: true });
+    };
 
     return (
         <div className="fb-media-card">
             <div className="fb-media-preview">
                 {file.type === 'image' ? (
-                    <img src={file.url} alt={file.filename} loading="lazy" />
+                    <img src={previewUrl} alt={file.filename} loading="lazy" />
                 ) : file.type === 'video' ? (
-                    <video src={file.url} controls />
+                    <video src={previewUrl} controls />
                 ) : file.type === 'audio' ? (
                     <div className="w-full px-4">
                         <Icon className="mx-auto mb-4 h-10 w-10 fb-muted" />
-                        <audio src={file.url} className="w-full" controls />
+                        <audio src={previewUrl} className="w-full" controls />
                     </div>
                 ) : (
                     <Icon className="h-12 w-12 fb-muted" />
@@ -314,6 +356,7 @@ function AssetCard({ file }) {
                     <div className="truncate text-[13px] font-semibold text-[var(--fg)]">{file.filename}</div>
                     <div className="mt-1 flex flex-wrap gap-2">
                         <Badge>{file.type}</Badge>
+                        <Badge variant={file.visibility === 'private' ? 'amber' : 'green'}>{file.visibility || 'public'}</Badge>
                         <span className="fb-mono text-[10px] fb-dim">{file.size}</span>
                         <span className="fb-mono text-[10px] fb-dim">{file.createdAt}</span>
                     </div>
@@ -322,13 +365,38 @@ function AssetCard({ file }) {
                 {file.path && <div className="mt-2 truncate fb-mono text-[10px] fb-dim">{file.path}</div>}
                 <div className="mt-3 flex flex-wrap gap-2">
                     <CopyButton value={file.url} label="URL" />
-                    <ExternalButton href={file.url} />
+                    {file.assetUrl && <CopyButton value={file.assetUrl} label="Asset" />}
+                    {file.variantUrl && (
+                        <CopyButton value={file.variantUrl} label="WebP" />
+                    )}
+                    {file.visibility === 'private' && (
+                        <Button type="button" variant="secondary" size="sm" onClick={copySignedUrl} disabled={signedState.loading}>
+                            <Lock className="h-3.5 w-3.5" />
+                            Signed
+                        </Button>
+                    )}
+                    <ExternalButton href={previewUrl} />
+                    {file.variantUrl && (
+                        <ExternalButton href={file.variantUrl} label="Variant" />
+                    )}
+                    <Button type="button" variant="secondary" size="sm" onClick={toggleVisibility} title="Toggle visibility">
+                        {file.visibility === 'private' ? <Unlock className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                    </Button>
                     <Button asChild variant="destructive" size="sm">
                         <Link href={route('media.destroy', file.id)} method="delete" as="button" preserveScroll>
                             <Trash2 className="h-3.5 w-3.5" />
                         </Link>
                     </Button>
                 </div>
+                {file.variantUrl && (
+                    <div className="mt-2 flex items-center gap-2 text-[10px] fb-dim">
+                        <Wand2 className="h-3 w-3" />
+                        <span className="truncate">Variant: /asset/{file.publicId}?w=512&q=80</span>
+                    </div>
+                )}
+                {signedState.url && file.visibility === 'private' && (
+                    <code className="fb-inline-code mt-2 block truncate">{signedState.url}</code>
+                )}
             </div>
         </div>
     );

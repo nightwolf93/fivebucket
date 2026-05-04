@@ -1653,6 +1653,17 @@
         object-fit: cover;
     }
 
+    .fb-billing-meter {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+    }
+
+    .fb-billing-layout {
+        grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+        margin-bottom: 12px;
+    }
+
     .fb-log-row {
         border-bottom: 1px solid var(--border);
         background: var(--bg-elev);
@@ -3131,6 +3142,10 @@
     .fb-docs-page {
         grid-template-columns: 180px minmax(0, 1fr);
     }
+
+    .fb-billing-meter {
+        grid-template-columns: 1fr;
+    }
 }
 
 @media (max-width: 860px) {
@@ -3187,6 +3202,7 @@
     .fb-grid.cols-2,
     .fb-grid.cols-3,
     .fb-grid.cols-4,
+    .fb-billing-layout,
     .fb-kpis,
     .fb-alert-grid,
     .fb-alert-grid.compact,

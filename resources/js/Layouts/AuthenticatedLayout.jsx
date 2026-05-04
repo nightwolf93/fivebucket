@@ -6,6 +6,7 @@ import {
     Boxes,
     Bell,
     ChevronDown,
+    CreditCard,
     KeyRound,
     LayoutDashboard,
     LogOut,
@@ -29,6 +30,7 @@ const baseNavigation = [
             { label: 'Alerts', href: () => route('alerts.index'), active: () => route().current('alerts.*'), icon: Bell },
             { label: 'Media', href: () => route('media.index'), active: () => route().current('media.*'), icon: Boxes },
             { label: 'API Keys', href: () => route('api-keys.index'), active: () => route().current('api-keys.*'), icon: KeyRound },
+            { label: 'Billing', href: () => route('billing.usage'), active: () => route().current('billing.*'), icon: CreditCard },
         ],
     },
     {

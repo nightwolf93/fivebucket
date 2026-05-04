@@ -19,19 +19,29 @@ RUN apk add --no-cache \
         bash \
         ca-certificates \
         curl \
+        freetype \
         icu-libs \
+        libjpeg-turbo \
+        libpng \
+        libwebp \
         libzip \
         netcat-openbsd \
         postgresql-libs \
     && apk add --no-cache --virtual .build-deps \
         $PHPIZE_DEPS \
+        freetype-dev \
         icu-dev \
+        libjpeg-turbo-dev \
+        libpng-dev \
+        libwebp-dev \
         libzip-dev \
         linux-headers \
         postgresql-dev \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
     && docker-php-ext-install -j"$(nproc)" \
         bcmath \
         exif \
+        gd \
         intl \
         opcache \
         pcntl \

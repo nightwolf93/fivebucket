@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Events\MediaChanged;
 use App\Models\ApiToken;
-use App\Models\Team;
 use App\Models\User;
 use App\Services\TeamProvisioner;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -28,6 +27,7 @@ class ClientManagementTest extends TestCase
         $this->actingAs($user)->get('/media')->assertOk();
         $this->actingAs($user)->get('/logs')->assertOk();
         $this->actingAs($user)->get('/settings')->assertOk();
+        $this->actingAs($user)->get('/billing/usage')->assertOk();
     }
 
     public function test_public_url_override_is_used_for_new_uploads(): void
@@ -111,6 +111,91 @@ class ClientManagementTest extends TestCase
         ]);
 
         Event::assertDispatchedTimes(MediaChanged::class, 2);
+    }
+
+    public function test_duplicate_upload_reuses_existing_media_and_storage_usage(): void
+    {
+        Storage::fake('public');
+        config([
+            'fivebucket.storage_disk' => 'public',
+            'fivebucket.public_base_url' => 'http://localhost/storage',
+        ]);
+
+        $user = User::factory()->create();
+        $team = app(TeamProvisioner::class)->createDefaultTeam($user);
+        [, $plainToken] = ApiToken::issue($team, $user, 'Upload key');
+
+        $first = $this->post('/api/v3/file', [
+            'file' => UploadedFile::fake()->createWithContent('evidence.txt', 'same-content'),
+        ], ['Authorization' => $plainToken])->assertOk();
+
+        $second = $this->post('/api/v3/file', [
+            'file' => UploadedFile::fake()->createWithContent('copy.txt', 'same-content'),
+        ], ['Authorization' => $plainToken])->assertOk();
+
+        $this->assertSame($first->json('data.id'), $second->json('data.id'));
+        $this->assertTrue($second->json('data.duplicate'));
+        $this->assertSame(strlen('same-content'), $team->fresh()->storage_used_bytes);
+        $this->assertSame(1, $team->mediaFiles()->count());
+    }
+
+    public function test_private_media_requires_signed_url_and_exposes_asset_variants(): void
+    {
+        Storage::fake('public');
+        config([
+            'fivebucket.storage_disk' => 'public',
+            'fivebucket.public_base_url' => 'http://localhost/storage',
+        ]);
+
+        $user = User::factory()->create();
+        $team = app(TeamProvisioner::class)->createDefaultTeam($user);
+        [, $plainToken] = ApiToken::issue($team, $user, 'Upload key');
+
+        $upload = $this->post('/api/v3/file', [
+            'file' => UploadedFile::fake()->createWithContent('private.txt', 'secret'),
+            'visibility' => 'private',
+        ], ['Authorization' => $plainToken])->assertOk();
+
+        $fileId = $upload->json('data.id');
+        $this->assertStringContainsString('/asset/'.$fileId, $upload->json('data.assetUrl'));
+        $this->assertNotNull($upload->json('data.signedUrl'));
+
+        $this->get('/asset/'.$fileId)->assertForbidden();
+        $signedResponse = $this->get($upload->json('data.signedUrl'))->assertOk();
+        $this->assertSame('secret', $signedResponse->streamedContent());
+
+        $this->getJson('/api/v3/file/'.$fileId.'/signed-url?w=512&q=80&format=webp', ['Authorization' => $plainToken])
+            ->assertOk()
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonStructure(['data' => ['signedUrl', 'expiresIn']]);
+    }
+
+    public function test_overage_guard_extends_effective_storage_limit(): void
+    {
+        Storage::fake('public');
+        config(['fivebucket.storage_disk' => 'public']);
+
+        $user = User::factory()->create();
+        $team = app(TeamProvisioner::class)->createDefaultTeam($user);
+        $team->forceFill([
+            'storage_limit_bytes' => 1,
+            'overage_enabled' => true,
+            'overage_cap_bytes' => 1024,
+        ])->save();
+        [, $plainToken] = ApiToken::issue($team, $user, 'Upload key');
+
+        $this->post('/api/v3/file', [
+            'file' => UploadedFile::fake()->createWithContent('small.txt', 'fits-overage'),
+        ], ['Authorization' => $plainToken])->assertOk();
+
+        $this->assertSame(strlen('fits-overage'), $team->fresh()->storage_used_bytes);
+
+        $this->actingAs($user)->patch(route('billing.usage.update'), [
+            'overage_enabled' => false,
+            'overage_cap_gb' => 0,
+        ])->assertRedirect();
+
+        $this->assertFalse($team->fresh()->overage_enabled);
     }
 
     public function test_admin_can_update_team_quota_and_user_role(): void

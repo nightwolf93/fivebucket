@@ -62,6 +62,7 @@ class LogController extends Controller
             $team = $this->team($request);
             $logs = $this->logPayloads($entries);
             $stored = $this->logs->store($team, $this->apiToken($request), $entries);
+            $this->recordLogUsage($team, $stored, $payload);
             $this->broadcastLogs($team, $logs, $stored);
             $this->evaluateAlerts($team, $stored, $logs);
 
@@ -90,6 +91,7 @@ class LogController extends Controller
             $team = $this->team($request);
             $logs = $this->logPayloads($entries);
             $stored = $this->logs->store($team, $this->apiToken($request), $entries);
+            $this->recordLogUsage($team, $stored, $payload);
             $this->broadcastLogs($team, $logs, $stored);
             $this->evaluateAlerts($team, $stored, $logs);
 
@@ -150,6 +152,26 @@ class LogController extends Controller
 
         try {
             EvaluateLogAlerts::dispatch($team->id, null, false, $logs);
+        } catch (Throwable $exception) {
+            report($exception);
+        }
+    }
+
+    private function recordLogUsage(Team $team, int $stored, array $payload): void
+    {
+        if ($stored <= 0) {
+            return;
+        }
+
+        try {
+            $team->usageRecords()->create([
+                'metric' => 'logs_ingested',
+                'delta' => $stored,
+                'reason' => 'logs_ingested',
+                'metadata' => [
+                    'estimated_bytes' => strlen(json_encode($payload, JSON_UNESCAPED_SLASHES) ?: ''),
+                ],
+            ]);
         } catch (Throwable $exception) {
             report($exception);
         }

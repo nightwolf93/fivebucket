@@ -29,8 +29,10 @@ const sections = [
     { id: 'install', label: 'Install' },
     { id: 'auth', label: 'Auth' },
     { id: 'lua-sdk', label: 'Lua SDK' },
+    { id: 'js-sdk', label: 'JS/TS SDK' },
     { id: 'js-fivem', label: 'JS FiveM' },
     { id: 'media', label: 'Media API' },
+    { id: 'framework-examples', label: 'Frameworks' },
     { id: 'logs', label: 'Logs API' },
     { id: 'sdk', label: 'SDK API' },
     { id: 'reference', label: 'Reference' },
@@ -44,6 +46,8 @@ const endpoints = [
     ['POST', '/api/v3/file/base64', 'media', 'Upload a base64 data URL or raw base64 payload.'],
     ['GET', '/api/v3/file/presigned-url', 'media', 'Create a temporary browser upload URL.'],
     ['POST', '/api/v3/file/presigned-url/{token}', 'public temporary token', 'Upload with a generated presigned token.'],
+    ['GET', '/api/v3/file/{id}/signed-url', 'media', 'Create a temporary signed download URL for private media or variants.'],
+    ['GET', '/asset/{id}?w=512&q=80&format=webp', 'public or signed', 'Serve original media or image variants through FiveBucket.'],
     ['GET', '/api/v3/file/{id}', 'media', 'Read one media metadata record.'],
     ['DELETE', '/api/v3/file/{id}', 'media', 'Delete one media object and its database record.'],
     ['POST', '/api/image', 'media', 'Legacy Fivemanage-compatible image upload.'],
@@ -310,21 +314,109 @@ PerformHttpRequest(BASE_URL + '/api/logs', (status, body) => {
   'Content-Type': 'application/json',
   Accept: 'application/json',
 });`,
+    jsSdkBasic: `import { FiveBucketClient } from '@fivebucket/sdk';
+
+const fivebucket = new FiveBucketClient({
+  baseUrl: 'https://fivebucket.nightwolf.fr',
+  apiKey: process.env.FIVEBUCKET_API_KEY,
+});
+
+await fivebucket.log({
+  level: 'info',
+  message: 'Admin command used',
+  resource: 'moderation',
+  metadata: {
+    source: 12,
+    command: 'bring',
+    target: 42,
+  },
+});`,
+    jsSdkPrivateUpload: `const uploaded = await fivebucket.uploadBase64(dataUrl, {
+  filename: 'evidence.jpg',
+  path: 'evidence/admin',
+  visibility: 'private',
+  metadata: {
+    caseId: 'BCSO-1042',
+    charId: 1,
+  },
+});
+
+const signed = await fivebucket.signedFileUrl(uploaded.data.id, {
+  expires: 900,
+  w: 512,
+  q: 80,
+  format: 'webp',
+});
+
+console.log(signed.data.signedUrl);`,
+    assetVariant: `GET /asset/01HV7AJ1KJ3W4Y9QH7N7B9XGRT?w=512&q=80&format=webp HTTP/1.1
+
+HTTP/1.1 200 OK
+Content-Type: image/webp
+Cache-Control: public, max-age=31536000, immutable`,
+    esxExample: `local ESX = exports.es_extended:getSharedObject()
+
+RegisterCommand('fb_esx_audit', function(source, args)
+  local player = ESX.GetPlayerFromId(source)
+
+  exports.fivebucket:Info('ESX admin command used', {
+    source = source,
+    identifier = player and player.identifier or nil,
+    charName = player and player.getName and player.getName() or GetPlayerName(source),
+    group = player and player.getGroup and player.getGroup() or nil,
+    command = args[1] or 'unknown',
+    args = args,
+    framework = 'esx',
+  }, GetCurrentResourceName())
+end, true)`,
+    qbcoreExample: `local QBCore = exports['qb-core']:GetCoreObject()
+
+QBCore.Commands.Add('fb_qb_audit', 'Audit admin command', {}, false, function(source, args)
+  local player = QBCore.Functions.GetPlayer(source)
+  local charinfo = player and player.PlayerData.charinfo or {}
+
+  exports.fivebucket:Warn('QBCore admin command used', {
+    source = source,
+    citizenid = player and player.PlayerData.citizenid or nil,
+    charName = ((charinfo.firstname or '') .. ' ' .. (charinfo.lastname or '')),
+    command = 'fb_qb_audit',
+    args = args,
+    framework = 'qbcore',
+  }, GetCurrentResourceName())
+end, 'admin')`,
+    oxCoreExample: `RegisterCommand('fb_ox_audit', function(source, args)
+  local player = exports.ox_core:GetPlayer(source)
+  local character = player and (player.char or {}) or {}
+
+  exports.fivebucket:Info('ox_core admin command used', {
+    source = source,
+    charId = character.charId or character.id,
+    charName = character.fullName or character.name,
+    command = 'fb_ox_audit',
+    args = args,
+    framework = 'ox_core',
+  }, GetCurrentResourceName())
+end, true)`,
     multipart: `POST /api/v3/file HTTP/1.1
 Authorization: fbk_xxxxxxxxxxxxxxxxx
 Content-Type: multipart/form-data
 
 file=@screenshot.png
 path=screenshots/police
+visibility=private
 metadata={"playerSource":42,"resource":"police","caseId":"BCSO-1042"}`,
     uploadResponse: `{
   "status": "ok",
   "url": "https://cdn.example.com/teams/team-id/screenshots/police/01HV7.png",
   "image": "https://cdn.example.com/teams/team-id/screenshots/police/01HV7.png",
-  "data": {
+    "data": {
     "id": "01HV7AJ1KJ3W4Y9QH7N7B9XGRT",
     "url": "https://cdn.example.com/teams/team-id/screenshots/police/01HV7.png",
-    "originalUrl": "https://cdn.example.com/teams/team-id/screenshots/police/01HV7.png"
+    "originalUrl": "https://cdn.example.com/teams/team-id/screenshots/police/01HV7.png",
+    "assetUrl": "https://fivebucket.nightwolf.fr/asset/01HV7AJ1KJ3W4Y9QH7N7B9XGRT",
+    "variantUrl": "https://fivebucket.nightwolf.fr/asset/01HV7AJ1KJ3W4Y9QH7N7B9XGRT?w=512&q=80&format=webp",
+    "visibility": "public",
+    "duplicate": false
   }
 }`,
     base64: `POST /api/v3/file/base64 HTTP/1.1
@@ -352,7 +444,10 @@ Content-Type: application/json
         "caseId": "BCSO-1042"
       },
       "url": "https://cdn.example.com/uploads/evidence.png",
-      "originalUrl": "https://cdn.example.com/uploads/evidence.png"
+      "originalUrl": "https://cdn.example.com/uploads/evidence.png",
+      "assetUrl": "https://fivebucket.nightwolf.fr/asset/01HV7AJ1KJ3W4Y9QH7N7B9XGRT",
+      "variantUrl": "https://fivebucket.nightwolf.fr/asset/01HV7AJ1KJ3W4Y9QH7N7B9XGRT?w=512&q=80&format=webp",
+      "visibility": "public"
     }
   ],
   "pagination": {
@@ -585,6 +680,19 @@ function DocsPage({ dashboard = false }) {
                     </Grid>
                 </Section>
 
+                <Section id="js-sdk" icon={Code2} title="SDK JavaScript / TypeScript">
+                    <p className="text-[12px] leading-6 fb-muted">
+                        Le package officiel `@fivebucket/sdk` couvre les usages Node.js, panels internes, jobs d'administration et resources FiveM server-side JS. Il expose les uploads publics/prives, les signed URLs temporaires, les variants image et l'ingestion logs.
+                    </p>
+                    <Grid>
+                        <Example title="Client TypeScript minimal" code={examples.jsSdkBasic} language="js" />
+                        <Example title="Upload prive + signed variant" code={examples.jsSdkPrivateUpload} language="js" />
+                    </Grid>
+                    <Callout>
+                        Le SDK JS/TS se trouve dans `packages/fivebucket-js`. Il est pret a compiler avec `npm run build` et n'ajoute aucune dependance runtime autre que `fetch`.
+                    </Callout>
+                </Section>
+
                 <Section id="js-fivem" icon={Server} title="JavaScript FiveM">
                     <p className="text-[12px] leading-6 fb-muted">
                         En runtime JS FiveM, vous pouvez appeler les exports `fivebucket` de la meme facon. Pour les integrations HTTP directes, faites-les cote serveur uniquement et lisez la cle depuis une convar.
@@ -598,12 +706,14 @@ function DocsPage({ dashboard = false }) {
 
                 <Section id="media" icon={UploadCloud} title="Media API">
                     <p className="text-[12px] leading-6 fb-muted">
-                        Les medias supportent images, videos, audio et fichiers generiques. Les options communes sont `filename`, `path`, `metadata`, `retentionExempt` et `retention_exempt`. La reponse garde `url` au niveau racine pour compatibilite et expose aussi `data.url`.
+                        Les medias supportent images, videos, audio et fichiers generiques. Les options communes sont `filename`, `path`, `metadata`, `retentionExempt`, `visibility=public|private` et `retention_exempt`. La reponse garde `url` au niveau racine pour compatibilite et expose aussi `assetUrl`, `variantUrl`, `signedUrl` et `duplicate`.
                     </p>
                     <Endpoint method="GET" path="/api/v3/file?limit=50&page=1&type=image&path=screenshots" description="List media. `limit` is capped at 100. Optional filters: `type`, `path`." />
                     <Endpoint method="POST" path="/api/v3/file" description="Multipart upload using field `file`, `image`, `video` or `audio`." />
                     <Endpoint method="POST" path="/api/v3/file/base64" description="JSON base64 upload. Accepts a data URL or base64 payload." />
                     <Endpoint method="GET" path="/api/v3/file/presigned-url" description="Generate a short-lived upload URL for browser/client uploads." />
+                    <Endpoint method="GET" path="/api/v3/file/{id}/signed-url?expires=900&w=512&q=80&format=webp" description="Generate a temporary signed URL for private media or image variants." />
+                    <Endpoint method="GET" path="/asset/{id}?w=512&q=80&format=webp" description="Serve an image variant as WebP. Private media requires a signed URL." />
                     <Endpoint method="GET / DELETE" path="/api/v3/file/{id}" description="Read or delete a single media object." />
 
                     <Grid>
@@ -612,6 +722,18 @@ function DocsPage({ dashboard = false }) {
                         <Example title="Base64 upload" code={examples.base64} language="http" />
                         <Example title="List response" code={examples.listResponse} language="json" />
                         <Example title="Presigned URL" code={examples.presigned} language="http" />
+                        <Example title="Image variant route" code={examples.assetVariant} language="http" />
+                    </Grid>
+                </Section>
+
+                <Section id="framework-examples" icon={Workflow} title="Framework Examples">
+                    <p className="text-[12px] leading-6 fb-muted">
+                        Des exemples complets sont disponibles dans `examples/fivem/esx`, `examples/fivem/qbcore` et `examples/fivem/ox_core`. Ils montrent comment enrichir les logs avec les identifiants character/player de chaque framework.
+                    </p>
+                    <Grid>
+                        <Example title="ESX admin audit" code={examples.esxExample} language="lua" />
+                        <Example title="QBCore admin audit" code={examples.qbcoreExample} language="lua" />
+                        <Example title="ox_core admin audit" code={examples.oxCoreExample} language="lua" />
                     </Grid>
                 </Section>
 

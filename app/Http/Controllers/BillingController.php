@@ -6,7 +6,9 @@ use App\Models\BillingEvent;
 use App\Models\Plan;
 use App\Models\Subscription as TeamSubscription;
 use App\Models\Team;
+use App\Services\Logs\LogStorage;
 use App\Services\TeamProvisioner;
+use App\Support\ByteFormatter;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -24,8 +26,50 @@ use Throwable;
 
 class BillingController extends Controller
 {
-    public function __construct(private readonly TeamProvisioner $teams)
+    public function __construct(
+        private readonly TeamProvisioner $teams,
+        private readonly LogStorage $logs,
+    ) {}
+
+    public function usage(Request $request): \Inertia\Response
     {
+        $team = $this->teams->defaultTeamFor($request->user())->load('plan');
+
+        return Inertia::render('Billing/Usage', [
+            'team' => $this->teamPayload($team),
+            'usage' => $this->usagePayload($team),
+            'plans' => Plan::query()
+                ->where('is_active', true)
+                ->orderBy('included_bytes')
+                ->get()
+                ->map(fn (Plan $plan) => [
+                    'name' => $plan->name,
+                    'slug' => $plan->slug,
+                    'included' => ByteFormatter::human($plan->included_bytes),
+                    'includedBytes' => $plan->included_bytes,
+                    'monthly' => $this->money($plan->monthly_price_cents),
+                    'overage' => $this->money($plan->overage_price_cents_per_gb).'/GB',
+                    'stripeReady' => filled($plan->stripe_price_id),
+                ]),
+        ]);
+    }
+
+    public function updateUsage(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'overage_enabled' => ['nullable', 'boolean'],
+            'overage_cap_gb' => ['nullable', 'numeric', 'min:0', 'max:100000'],
+        ]);
+
+        $team = $this->teams->defaultTeamFor($request->user());
+        $enabled = (bool) ($validated['overage_enabled'] ?? false);
+
+        $team->forceFill([
+            'overage_enabled' => $enabled,
+            'overage_cap_bytes' => $enabled ? ByteFormatter::gbToBytes((float) ($validated['overage_cap_gb'] ?? 0)) : 0,
+        ])->save();
+
+        return back()->with('success', 'Usage guard updated.');
     }
 
     public function checkout(Request $request): Response|RedirectResponse
@@ -209,5 +253,82 @@ class BillingController extends Controller
     private function configured(): bool
     {
         return filled(config('fivebucket.stripe.secret'));
+    }
+
+    private function teamPayload(Team $team): array
+    {
+        return [
+            'id' => $team->id,
+            'name' => $team->name,
+            'slug' => $team->slug,
+            'billingStatus' => $team->billing_status,
+            'plan' => $team->plan ? [
+                'name' => $team->plan->name,
+                'slug' => $team->plan->slug,
+                'included' => ByteFormatter::human($team->plan->included_bytes),
+                'monthly' => $this->money($team->plan->monthly_price_cents),
+                'overage' => $this->money($team->plan->overage_price_cents_per_gb).'/GB',
+            ] : null,
+            'storageUsed' => ByteFormatter::human($team->storage_used_bytes),
+            'storageLimit' => ByteFormatter::human($team->storage_limit_bytes),
+            'effectiveStorageLimit' => ByteFormatter::human($team->effectiveStorageLimitBytes()),
+            'storageUsedBytes' => $team->storage_used_bytes,
+            'storageLimitBytes' => $team->storage_limit_bytes,
+            'effectiveStorageLimitBytes' => $team->effectiveStorageLimitBytes(),
+            'overageEnabled' => (bool) $team->overage_enabled,
+            'overageCapGb' => ByteFormatter::bytesToGb((int) $team->overage_cap_bytes),
+        ];
+    }
+
+    private function usagePayload(Team $team): array
+    {
+        $periodStart = now()->startOfMonth();
+        $periodEnd = now()->endOfMonth();
+        $usageQuery = $team->usageRecords()->where('created_at', '>=', $periodStart);
+        $bandwidthBytes = (int) (clone $usageQuery)->where('metric', 'bandwidth_bytes')->sum('delta');
+        $deduplicatedBytes = (int) (clone $usageQuery)->where('metric', 'deduplicated_bytes')->sum('delta');
+        $logsIngested = (int) (clone $usageQuery)->where('metric', 'logs_ingested')->sum('delta');
+
+        try {
+            $logsIngested = max($logsIngested, $this->logs->count($team, [
+                'from' => $periodStart->toIso8601String(),
+                'to' => now()->toIso8601String(),
+            ]));
+        } catch (Throwable $exception) {
+            report($exception);
+        }
+
+        $billableOverageBytes = $team->billableOverageBytes();
+        $billableOverageGb = $billableOverageBytes > 0 ? (int) ceil($billableOverageBytes / 1024 / 1024 / 1024) : 0;
+        $overagePriceCents = (int) ($team->plan?->overage_price_cents_per_gb ?? config('fivebucket.default_overage_price_cents_per_gb'));
+        $estimatedOverageCents = $billableOverageGb * $overagePriceCents;
+        $monthlyBaseCents = (int) ($team->plan?->monthly_price_cents ?? 0);
+
+        return [
+            'period' => [
+                'label' => $periodStart->format('M d').' - '.$periodEnd->format('M d, Y'),
+                'start' => $periodStart->toDateString(),
+                'end' => $periodEnd->toDateString(),
+            ],
+            'storagePercent' => round(($team->storage_used_bytes / max(1, $team->effectiveStorageLimitBytes())) * 100, 1),
+            'baseStoragePercent' => round(($team->storage_used_bytes / max(1, $team->storage_limit_bytes)) * 100, 1),
+            'billableOverageBytes' => $billableOverageBytes,
+            'billableOverage' => ByteFormatter::human($billableOverageBytes),
+            'billableOverageGb' => $billableOverageGb,
+            'overagePrice' => $this->money($overagePriceCents).'/GB',
+            'monthlyBase' => $this->money($monthlyBaseCents),
+            'estimatedOverage' => $this->money($estimatedOverageCents),
+            'estimatedTotal' => $this->money($monthlyBaseCents + $estimatedOverageCents),
+            'logsIngested' => $logsIngested,
+            'bandwidth' => ByteFormatter::human(max(0, $bandwidthBytes)),
+            'bandwidthBytes' => max(0, $bandwidthBytes),
+            'deduplicated' => ByteFormatter::human(max(0, $deduplicatedBytes)),
+            'deduplicatedBytes' => max(0, $deduplicatedBytes),
+        ];
+    }
+
+    private function money(int $cents): string
+    {
+        return number_format($cents / 100, 2).' EUR';
     }
 }

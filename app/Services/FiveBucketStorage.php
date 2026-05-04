@@ -22,10 +22,14 @@ class FiveBucketStorage
         $filename = $this->sanitizeFilename($options['filename'] ?? $file->getClientOriginalName() ?: 'upload');
         $mime = $file->getMimeType() ?: $file->getClientMimeType() ?: 'application/octet-stream';
         $extension = $this->extensionFor($filename, $mime);
+        $contentHash = hash_file('sha256', $file->getRealPath()) ?: null;
         $contents = fopen($file->getRealPath(), 'rb');
 
-        $mediaFile = $this->persist($team, $apiToken, $contents, $size, $filename, $mime, $extension, $options);
-        $this->broadcastMediaEvent(MediaChanged::created($mediaFile, $team));
+        $mediaFile = $this->persist($team, $apiToken, $contents, $size, $filename, $mime, $extension, $options, $contentHash);
+
+        if ($mediaFile->wasRecentlyCreated) {
+            $this->broadcastMediaEvent(MediaChanged::created($mediaFile, $team));
+        }
 
         return $mediaFile;
     }
@@ -49,9 +53,13 @@ class FiveBucketStorage
         $mime ??= $options['mime_type'] ?? 'application/octet-stream';
         $filename = $this->sanitizeFilename($options['filename'] ?? 'upload.'.$this->extensionFromMime($mime));
         $extension = $this->extensionFor($filename, $mime);
+        $contentHash = hash('sha256', $contents);
 
-        $mediaFile = $this->persist($team, $apiToken, $contents, strlen($contents), $filename, $mime, $extension, $options);
-        $this->broadcastMediaEvent(MediaChanged::created($mediaFile, $team));
+        $mediaFile = $this->persist($team, $apiToken, $contents, strlen($contents), $filename, $mime, $extension, $options, $contentHash);
+
+        if ($mediaFile->wasRecentlyCreated) {
+            $this->broadcastMediaEvent(MediaChanged::created($mediaFile, $team));
+        }
 
         return $mediaFile;
     }
@@ -97,6 +105,29 @@ class FiveBucketStorage
         if ($deletedFile) {
             $this->broadcastMediaEvent(MediaChanged::deleted($deletedFile));
         }
+    }
+
+    public function updateVisibility(MediaFile $file, string $visibility): MediaFile
+    {
+        $visibility = $this->visibility($visibility);
+
+        return DB::transaction(function () use ($file, $visibility): MediaFile {
+            $lockedFile = MediaFile::query()->with('team')->whereKey($file->id)->lockForUpdate()->firstOrFail();
+
+            Storage::disk($this->disk())->setVisibility($lockedFile->storage_key, $visibility);
+
+            $url = $visibility === 'private'
+                ? route('assets.show', ['mediaFile' => $lockedFile->public_id])
+                : $this->publicUrl($lockedFile->storage_key, $lockedFile->team);
+
+            $lockedFile->forceFill([
+                'visibility' => $visibility,
+                'url' => $url,
+                'original_url' => $url,
+            ])->save();
+
+            return $lockedFile;
+        });
     }
 
     public function createPresignedUrl(Team $team, ?ApiToken $apiToken, ?int $expiresAt = null, ?string $fileType = null, string $path = '/api/v3/file/presigned-url'): string
@@ -161,16 +192,60 @@ class FiveBucketStorage
         return filter_var($value, FILTER_VALIDATE_BOOLEAN);
     }
 
-    private function persist(Team $team, ?ApiToken $apiToken, mixed $contents, int $size, string $filename, string $mime, ?string $extension, array $options): MediaFile
+    private function persist(Team $team, ?ApiToken $apiToken, mixed $contents, int $size, string $filename, string $mime, ?string $extension, array $options, ?string $contentHash): MediaFile
     {
         if ($size <= 0) {
             throw new HttpException(400, 'File is empty.');
         }
 
-        return DB::transaction(function () use ($team, $apiToken, $contents, $size, $filename, $mime, $extension, $options): MediaFile {
-            $lockedTeam = Team::query()->whereKey($team->id)->lockForUpdate()->firstOrFail();
+        return DB::transaction(function () use ($team, $apiToken, $contents, $size, $filename, $mime, $extension, $options, $contentHash): MediaFile {
+            $lockedTeam = Team::query()->with('plan')->whereKey($team->id)->lockForUpdate()->firstOrFail();
+            $visibility = $this->visibility($options['visibility'] ?? null);
+
+            if ($lockedTeam->plan?->max_upload_bytes && $size > $lockedTeam->plan->max_upload_bytes) {
+                if (is_resource($contents)) {
+                    fclose($contents);
+                }
+
+                throw new HttpException(413, 'File exceeds max upload size for the current plan.');
+            }
+
+            if ($contentHash) {
+                $duplicate = MediaFile::query()
+                    ->where('team_id', $lockedTeam->id)
+                    ->where('content_hash', $contentHash)
+                    ->where('size_bytes', $size)
+                    ->where('mime_type', $mime)
+                    ->where('visibility', $visibility)
+                    ->whereNull('deleted_at')
+                    ->first();
+
+                if ($duplicate) {
+                    if (is_resource($contents)) {
+                        fclose($contents);
+                    }
+
+                    $lockedTeam->usageRecords()->create([
+                        'metric' => 'deduplicated_bytes',
+                        'delta' => $size,
+                        'reason' => 'file_deduplicated',
+                        'subject_type' => MediaFile::class,
+                        'subject_id' => $duplicate->id,
+                        'metadata' => [
+                            'filename' => $filename,
+                            'content_hash' => $contentHash,
+                        ],
+                    ]);
+
+                    return $duplicate;
+                }
+            }
 
             if (! $lockedTeam->hasStorageFor($size)) {
+                if (is_resource($contents)) {
+                    fclose($contents);
+                }
+
                 throw new HttpException(413, 'Storage quota exceeded.');
             }
 
@@ -179,12 +254,20 @@ class FiveBucketStorage
             $storageKey = $this->storageKey($lockedTeam, $publicId, $extension, $path);
             $type = $this->classify($mime);
 
-            Storage::disk($this->disk())->put($storageKey, $contents, [
-                'visibility' => 'public',
-                'ContentType' => $mime,
-            ]);
+            try {
+                Storage::disk($this->disk())->put($storageKey, $contents, [
+                    'visibility' => $visibility,
+                    'ContentType' => $mime,
+                ]);
+            } finally {
+                if (is_resource($contents)) {
+                    fclose($contents);
+                }
+            }
 
-            $url = $this->publicUrl($storageKey, $lockedTeam);
+            $url = $visibility === 'private'
+                ? route('assets.show', ['mediaFile' => $publicId])
+                : $this->publicUrl($storageKey, $lockedTeam);
 
             $file = MediaFile::create([
                 'team_id' => $lockedTeam->id,
@@ -197,8 +280,10 @@ class FiveBucketStorage
                 'extension' => $extension,
                 'type' => $type,
                 'size_bytes' => $size,
+                'content_hash' => $contentHash,
                 'metadata' => $this->metadata($options['metadata'] ?? null),
                 'retention_exempt' => $this->truthy($options['retentionExempt'] ?? $options['retention_exempt'] ?? false),
+                'visibility' => $visibility,
                 'url' => $url,
                 'original_url' => $url,
             ]);
@@ -263,6 +348,11 @@ class FiveBucketStorage
             str_starts_with($mime, 'audio/') => 'audio',
             default => 'file',
         };
+    }
+
+    private function visibility(mixed $value): string
+    {
+        return strtolower(trim((string) $value)) === 'private' ? 'private' : 'public';
     }
 
     private function extensionFor(string $filename, string $mime): ?string

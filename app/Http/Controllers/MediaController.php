@@ -6,6 +6,7 @@ use App\Models\MediaFile;
 use App\Services\FiveBucketStorage;
 use App\Services\TeamProvisioner;
 use App\Support\ByteFormatter;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -17,8 +18,7 @@ class MediaController extends Controller
     public function __construct(
         private readonly TeamProvisioner $teams,
         private readonly FiveBucketStorage $storage,
-    ) {
-    }
+    ) {}
 
     public function index(Request $request): Response
     {
@@ -72,6 +72,14 @@ class MediaController extends Controller
                     'size' => ByteFormatter::human($file->size_bytes),
                     'sizeBytes' => $file->size_bytes,
                     'url' => $file->deliveryUrl($team),
+                    'assetUrl' => $file->assetUrl(),
+                    'variantUrl' => $file->type === 'image'
+                        ? ($file->isPrivate() ? $file->signedUrl(query: ['w' => 512, 'q' => 80, 'format' => 'webp']) : $file->variantUrl(width: 512, quality: 80))
+                        : null,
+                    'signedUrl' => $file->isPrivate() ? $file->signedUrl() : null,
+                    'signedUrlEndpoint' => route('media.signed-url', $file),
+                    'visibility' => $file->visibility ?? 'public',
+                    'contentHash' => $file->content_hash,
                     'metadata' => $file->metadata ?? [],
                     'createdAt' => $file->created_at?->diffForHumans(),
                 ]),
@@ -93,6 +101,7 @@ class MediaController extends Controller
             'path' => ['nullable', 'string', 'max:255'],
             'metadata' => ['nullable', 'string', 'max:10000'],
             'retention_exempt' => ['nullable', 'boolean'],
+            'visibility' => ['nullable', 'string', 'in:public,private'],
         ]);
 
         $metadata = $this->decodeMetadata($validated['metadata'] ?? null);
@@ -103,22 +112,58 @@ class MediaController extends Controller
 
         $team = $this->teams->defaultTeamFor($request->user());
         $uploaded = 0;
+        $deduplicated = 0;
 
         try {
             foreach ($request->file('uploads', []) as $upload) {
-                $this->storage->storeUploadedFile($team, null, $upload, [
+                $mediaFile = $this->storage->storeUploadedFile($team, null, $upload, [
                     'path' => $validated['path'] ?? null,
                     'metadata' => $metadata,
                     'retention_exempt' => (bool) ($validated['retention_exempt'] ?? false),
+                    'visibility' => $validated['visibility'] ?? 'public',
                 ]);
 
-                $uploaded++;
+                $mediaFile->wasRecentlyCreated ? $uploaded++ : $deduplicated++;
             }
         } catch (HttpExceptionInterface $exception) {
             return back()->withErrors(['uploads' => $exception->getMessage()])->withInput();
         }
 
-        return back()->with('success', $uploaded.' media uploaded.');
+        return back()->with('success', trim($uploaded.' media uploaded'.($deduplicated > 0 ? " · {$deduplicated} duplicate reused" : '').'.'));
+    }
+
+    public function update(Request $request, MediaFile $mediaFile): RedirectResponse
+    {
+        $team = $this->teams->defaultTeamFor($request->user());
+        abort_unless($mediaFile->team_id === $team->id, 404);
+
+        $validated = $request->validate([
+            'visibility' => ['required', 'string', 'in:public,private'],
+        ]);
+
+        $this->storage->updateVisibility($mediaFile, $validated['visibility']);
+
+        return back()->with('success', 'Media visibility updated.');
+    }
+
+    public function signedUrl(Request $request, MediaFile $mediaFile): JsonResponse
+    {
+        $team = $this->teams->defaultTeamFor($request->user());
+        abort_unless($mediaFile->team_id === $team->id, 404);
+
+        $expires = max(60, min(604800, (int) $request->query('expires', 900)));
+        $query = array_filter([
+            'w' => $request->query('w'),
+            'h' => $request->query('h'),
+            'q' => $request->query('q'),
+            'format' => $request->query('format'),
+        ], fn ($value) => $value !== null && $value !== '');
+
+        return response()->json([
+            'status' => 'ok',
+            'url' => $mediaFile->signedUrl($expires, $query),
+            'expiresIn' => $expires,
+        ]);
     }
 
     public function destroy(Request $request, MediaFile $mediaFile): RedirectResponse

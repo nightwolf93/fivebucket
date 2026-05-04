@@ -19,6 +19,8 @@ class Team extends Model
         'slug',
         'storage_used_bytes',
         'storage_limit_bytes',
+        'overage_enabled',
+        'overage_cap_bytes',
         'billing_status',
         'stripe_customer_id',
         'public_base_url',
@@ -30,6 +32,8 @@ class Team extends Model
     protected $casts = [
         'storage_used_bytes' => 'integer',
         'storage_limit_bytes' => 'integer',
+        'overage_enabled' => 'boolean',
+        'overage_cap_bytes' => 'integer',
         'custom_domain_verified_at' => 'datetime',
         'settings' => 'array',
     ];
@@ -93,11 +97,21 @@ class Team extends Model
 
     public function remainingStorageBytes(): int
     {
-        return max(0, $this->storage_limit_bytes - $this->storage_used_bytes);
+        return max(0, $this->effectiveStorageLimitBytes() - $this->storage_used_bytes);
     }
 
     public function hasStorageFor(int $bytes): bool
     {
         return $bytes <= $this->remainingStorageBytes();
+    }
+
+    public function effectiveStorageLimitBytes(): int
+    {
+        return $this->storage_limit_bytes + ($this->overage_enabled ? $this->overage_cap_bytes : 0);
+    }
+
+    public function billableOverageBytes(): int
+    {
+        return max(0, $this->storage_used_bytes - $this->storage_limit_bytes);
     }
 }
