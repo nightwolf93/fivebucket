@@ -74,4 +74,38 @@ trait FormatsLogRows
             return null;
         }
     }
+
+    protected function flattenMetadata(array $metadata, string $prefix = ''): array
+    {
+        $items = [];
+
+        foreach ($metadata as $key => $value) {
+            $path = $prefix === '' ? (string) $key : $prefix.'.'.$key;
+
+            if (is_array($value)) {
+                $items += $this->flattenMetadata($value, $path);
+
+                continue;
+            }
+
+            $items[$path] = $value;
+        }
+
+        return $items;
+    }
+
+    protected function metadataPathValue(array $metadata, string $path): mixed
+    {
+        $value = $metadata;
+
+        foreach (array_filter(explode('.', $path), fn ($part) => $part !== '') as $segment) {
+            if (! is_array($value) || ! array_key_exists($segment, $value)) {
+                return null;
+            }
+
+            $value = $value[$segment];
+        }
+
+        return $value;
+    }
 }

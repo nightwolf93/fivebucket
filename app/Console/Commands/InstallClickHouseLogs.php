@@ -79,6 +79,8 @@ SQL;
             "ALTER TABLE {$table} ADD INDEX IF NOT EXISTS idx_fb_dataset JSON_VALUE(metadata, '$.\"dataset\"') TYPE bloom_filter(0.01) GRANULARITY 4",
             "ALTER TABLE {$table} ADD INDEX IF NOT EXISTS idx_fb_source JSON_VALUE(metadata, '$.\"source\"') TYPE bloom_filter(0.01) GRANULARITY 4",
             "ALTER TABLE {$table} ADD INDEX IF NOT EXISTS idx_fb_char_id JSON_VALUE(metadata, '$.\"charId\"') TYPE bloom_filter(0.01) GRANULARITY 4",
+            "ALTER TABLE {$table} ADD INDEX IF NOT EXISTS idx_fb_char_id_number ifNull(toFloat64OrNull(JSON_VALUE(metadata, '$.\"charId\"')), 0) TYPE minmax GRANULARITY 4",
+            "ALTER TABLE {$table} ADD INDEX IF NOT EXISTS idx_fb_cash_number ifNull(toFloat64OrNull(JSON_VALUE(metadata, '$.\"cash\"')), 0) TYPE minmax GRANULARITY 4",
         ];
     }
 

@@ -78,6 +78,31 @@ class DatabaseLogStorage implements LogStorage
             ->all();
     }
 
+    public function count(Team $team, array $filters = []): int
+    {
+        $query = $team->logEntries();
+
+        $this->applyFilters($query, $filters);
+
+        return $query->count();
+    }
+
+    public function metadataSuggestions(Team $team, array $filters = [], ?string $key = null, int $limit = 1000): array
+    {
+        $query = $team->logEntries();
+
+        $this->applyFilters($query, $filters, false);
+
+        $rows = $query
+            ->latest('occurred_at')
+            ->limit(max(100, min(5000, $limit)))
+            ->get(['metadata'])
+            ->map(fn (LogEntry $log) => ['metadata' => $log->metadata ?? []])
+            ->all();
+
+        return $this->buildMetadataSuggestions($rows, $key);
+    }
+
     public function summary(Team $team): array
     {
         $lastDay = now()->subDay();
@@ -125,7 +150,7 @@ class DatabaseLogStorage implements LogStorage
             ->all();
     }
 
-    private function applyFilters(Builder|HasMany $query, array $filters): void
+    private function applyFilters(Builder|HasMany $query, array $filters, bool $includeMetadataFilters = true): void
     {
         $q = trim((string) ($filters['q'] ?? ''));
 
@@ -190,15 +215,15 @@ class DatabaseLogStorage implements LogStorage
             });
         }
 
-        $metadataKey = $this->metadataKey($filters['metadataKey'] ?? '');
-        $metadataValue = trim((string) ($filters['metadataValue'] ?? ''));
-        if ($metadataKey !== null) {
-            $this->whereJsonText(
-                $query,
-                $metadataKey,
-                $metadataValue,
-                $this->metadataMode($filters['metadataMode'] ?? 'contains', $metadataValue === ''),
-            );
+        if ($includeMetadataFilters) {
+            foreach ($this->metadataFilters($filters) as $metadataFilter) {
+                $this->whereJsonText(
+                    $query,
+                    $metadataFilter['key'],
+                    $metadataFilter['value'] ?? '',
+                    $metadataFilter['operator'],
+                );
+            }
         }
 
         if (($durationMin = $this->number($filters['durationMin'] ?? null)) !== null) {
@@ -364,7 +389,12 @@ class DatabaseLogStorage implements LogStorage
             return 'exists';
         }
 
-        return in_array($mode, ['contains', 'exact'], true) ? $mode : 'contains';
+        return match ($mode) {
+            'eq', 'exact' => 'exact',
+            'ne', 'not' => 'ne',
+            'gt', 'gte', 'lt', 'lte' => $mode,
+            default => 'contains',
+        };
     }
 
     private function metadataLike(string $key, string $value): string
@@ -400,6 +430,19 @@ class DatabaseLogStorage implements LogStorage
                 return;
             }
 
+            if ($mode === 'ne') {
+                $query->{$method}('json_type(metadata, ?) IS NOT NULL AND CAST(json_extract(metadata, ?) AS TEXT) != ?', [$jsonPath, $jsonPath, $value]);
+
+                return;
+            }
+
+            if (in_array($mode, ['gt', 'gte', 'lt', 'lte'], true)) {
+                $operator = ['gt' => '>', 'gte' => '>=', 'lt' => '<', 'lte' => '<='][$mode];
+                $query->{$method}("CAST(json_extract(metadata, ?) AS REAL) {$operator} ?", [$jsonPath, (float) $value]);
+
+                return;
+            }
+
             $operator = $mode === 'exact' ? '=' : 'LIKE';
             $needle = $mode === 'exact' ? $value : "%{$value}%";
             $query->{$method}("CAST(json_extract(metadata, ?) AS TEXT) {$operator} ?", [$jsonPath, $needle]);
@@ -416,6 +459,19 @@ class DatabaseLogStorage implements LogStorage
 
             if ($mode === 'exists' || $value === '') {
                 $query->{$method}("JSON_CONTAINS_PATH(metadata, 'one', ?) = 1", [$jsonPath]);
+
+                return;
+            }
+
+            if ($mode === 'ne') {
+                $query->{$method}("JSON_CONTAINS_PATH(metadata, 'one', ?) = 1 AND JSON_UNQUOTE(JSON_EXTRACT(metadata, ?)) != ?", [$jsonPath, $jsonPath, $value]);
+
+                return;
+            }
+
+            if (in_array($mode, ['gt', 'gte', 'lt', 'lte'], true)) {
+                $operator = ['gt' => '>', 'gte' => '>=', 'lt' => '<', 'lte' => '<='][$mode];
+                $query->{$method}("CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, ?)) AS DECIMAL(18,6)) {$operator} ?", [$jsonPath, (float) $value]);
 
                 return;
             }
@@ -442,6 +498,55 @@ class DatabaseLogStorage implements LogStorage
         }
 
         $query->{$method}('metadata', 'like', $this->metadataLike($this->lastMetadataSegment($key), $value));
+    }
+
+    private function metadataFilters(array $filters): array
+    {
+        $items = $filters['metadataFilters'] ?? [];
+
+        if (is_string($items)) {
+            $items = json_decode($items, true) ?: [];
+        }
+
+        $conditions = collect(is_array($items) ? $items : [])
+            ->map(function ($item): ?array {
+                if (! is_array($item)) {
+                    return null;
+                }
+
+                $key = $this->metadataKey($item['key'] ?? '');
+                if ($key === null) {
+                    return null;
+                }
+
+                $value = trim((string) ($item['value'] ?? ''));
+
+                return [
+                    'key' => $key,
+                    'operator' => $this->metadataMode($item['operator'] ?? $item['mode'] ?? 'contains', $value === ''),
+                    'value' => $value !== '' ? $value : null,
+                ];
+            })
+            ->filter()
+            ->values()
+            ->all();
+
+        if ($conditions !== []) {
+            return $conditions;
+        }
+
+        $metadataKey = $this->metadataKey($filters['metadataKey'] ?? '');
+        $metadataValue = trim((string) ($filters['metadataValue'] ?? ''));
+
+        if ($metadataKey === null) {
+            return [];
+        }
+
+        return [[
+            'key' => $metadataKey,
+            'operator' => $this->metadataMode($filters['metadataMode'] ?? 'contains', $metadataValue === ''),
+            'value' => $metadataValue !== '' ? $metadataValue : null,
+        ]];
     }
 
     private function jsonPath(string $key): string
@@ -482,5 +587,38 @@ class DatabaseLogStorage implements LogStorage
     private function perPage(mixed $value): int
     {
         return max(10, min(250, (int) ($value ?: 25)));
+    }
+
+    private function buildMetadataSuggestions(array $rows, ?string $key): array
+    {
+        $keys = [];
+        $values = [];
+        $key = $this->metadataKey($key ?? '') ?? null;
+
+        foreach ($rows as $row) {
+            $metadata = $row['metadata'] ?? [];
+            $metadata = is_string($metadata) ? json_decode($metadata, true) : $metadata;
+
+            if (! is_array($metadata)) {
+                continue;
+            }
+
+            foreach ($this->flattenMetadata($metadata) as $path => $value) {
+                $keys[$path] = ($keys[$path] ?? 0) + 1;
+
+                if ($key !== null && $path === $key && ! is_array($value) && ! is_object($value)) {
+                    $label = $value === null ? 'null' : (string) $value;
+                    $values[$label] = ($values[$label] ?? 0) + 1;
+                }
+            }
+        }
+
+        arsort($keys);
+        arsort($values);
+
+        return [
+            'keys' => collect($keys)->take(80)->map(fn ($count, $path) => ['key' => $path, 'count' => $count])->values()->all(),
+            'values' => collect($values)->take(80)->map(fn ($count, $value) => ['value' => $value, 'count' => $count])->values()->all(),
+        ];
     }
 }

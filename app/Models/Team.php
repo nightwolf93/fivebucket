@@ -71,6 +71,21 @@ class Team extends Model
         return $this->hasMany(LogEntry::class);
     }
 
+    public function logSavedViews(): HasMany
+    {
+        return $this->hasMany(LogSavedView::class);
+    }
+
+    public function logWebhookEndpoints(): HasMany
+    {
+        return $this->hasMany(LogWebhookEndpoint::class);
+    }
+
+    public function logAlertRules(): HasMany
+    {
+        return $this->hasMany(LogAlertRule::class);
+    }
+
     public function usageRecords(): HasMany
     {
         return $this->hasMany(UsageRecord::class);

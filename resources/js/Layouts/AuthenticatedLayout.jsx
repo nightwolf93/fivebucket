@@ -4,6 +4,7 @@ import { Link, router, usePage } from '@inertiajs/react';
 import {
     BookOpen,
     Boxes,
+    Bell,
     ChevronDown,
     KeyRound,
     LayoutDashboard,
@@ -14,6 +15,7 @@ import {
     Settings,
     Shield,
     User,
+    Webhook,
     X,
 } from 'lucide-react';
 import { useState } from 'react';
@@ -24,6 +26,7 @@ const baseNavigation = [
         items: [
             { label: 'Dashboard', href: () => route('dashboard'), active: () => route().current('dashboard'), icon: LayoutDashboard },
             { label: 'Logs', href: () => route('logs.index'), active: () => route().current('logs.*'), icon: ScrollText, trail: 'L' },
+            { label: 'Alerts', href: () => route('alerts.index'), active: () => route().current('alerts.*'), icon: Bell },
             { label: 'Media', href: () => route('media.index'), active: () => route().current('media.*'), icon: Boxes },
             { label: 'API Keys', href: () => route('api-keys.index'), active: () => route().current('api-keys.*'), icon: KeyRound },
         ],
@@ -32,6 +35,7 @@ const baseNavigation = [
         title: 'Resource',
         items: [
             { label: 'Documentation', href: () => route('docs'), active: () => route().current('docs'), icon: BookOpen },
+            { label: 'Webhooks', href: () => route('webhooks.index'), active: () => route().current('webhooks.*'), icon: Webhook },
             { label: 'Settings', href: () => route('settings.index'), active: () => route().current('settings.*'), icon: Settings },
         ],
     },
@@ -39,7 +43,7 @@ const baseNavigation = [
 
 export default function Authenticated({ user, children }) {
     const [mobileOpen, setMobileOpen] = useState(false);
-    const { team } = usePage().props;
+    const { team, logSavedViews = [] } = usePage().props;
 
     const navigation = baseNavigation.map((section) => ({
         ...section,
@@ -52,6 +56,18 @@ export default function Authenticated({ user, children }) {
             href: () => route('admin.accounts.index'),
             active: () => route().current('admin.*'),
             icon: Shield,
+        });
+    }
+
+    if (logSavedViews.length > 0) {
+        navigation.splice(1, 0, {
+            title: 'Saved Logs',
+            items: logSavedViews.slice(0, 6).map((view) => ({
+                label: view.name,
+                href: () => route('logs.index', view.filters || {}),
+                active: () => false,
+                icon: ScrollText,
+            })),
         });
     }
 

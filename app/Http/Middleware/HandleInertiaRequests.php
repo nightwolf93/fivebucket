@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Services\TeamProvisioner;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -42,7 +43,21 @@ class HandleInertiaRequests extends Middleware
             'flash' => [
                 'apiToken' => fn () => $request->session()->get('api_token'),
                 'success' => fn () => $request->session()->get('success'),
+                'error' => fn () => $request->session()->get('error'),
             ],
+            'logSavedViews' => fn () => $request->user()
+                ? app(TeamProvisioner::class)->defaultTeamFor($request->user())->logSavedViews()
+                    ->where('pinned', true)
+                    ->orderBy('sort_order')
+                    ->limit(6)
+                    ->get(['id', 'name', 'filters', 'pinned'])
+                    ->map(fn ($view) => [
+                        'id' => $view->id,
+                        'name' => $view->name,
+                        'filters' => $view->filters,
+                        'pinned' => $view->pinned,
+                    ])
+                : [],
         ];
     }
 }

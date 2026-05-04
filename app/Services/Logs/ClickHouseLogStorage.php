@@ -92,6 +92,24 @@ class ClickHouseLogStorage implements LogStorage
             ->all();
     }
 
+    public function count(Team $team, array $filters = []): int
+    {
+        $where = $this->whereClause($team, $filters);
+
+        return (int) (($this->query('SELECT count() AS aggregate FROM '.$this->table().' '.$where)['data'][0]['aggregate'] ?? 0));
+    }
+
+    public function metadataSuggestions(Team $team, array $filters = [], ?string $key = null, int $limit = 1000): array
+    {
+        $limit = max(100, min(5000, $limit));
+        $where = $this->whereClause($team, $filters, false);
+        $result = $this->query(
+            'SELECT metadata FROM '.$this->table().' '.$where.' ORDER BY occurred_at DESC, id DESC LIMIT '.$limit
+        );
+
+        return $this->buildMetadataSuggestions($result['data'] ?? [], $key);
+    }
+
     public function summary(Team $team): array
     {
         $teamId = (int) $team->id;
@@ -213,7 +231,7 @@ class ClickHouseLogStorage implements LogStorage
         return $buckets;
     }
 
-    private function whereClause(Team $team, array $filters): string
+    private function whereClause(Team $team, array $filters, bool $includeMetadataFilters = true): string
     {
         $where = ['team_id = '.((int) $team->id)];
 
@@ -262,14 +280,14 @@ class ClickHouseLogStorage implements LogStorage
             )).')';
         }
 
-        $metadataKey = $this->metadataKey($filters['metadataKey'] ?? '');
-        $metadataValue = trim((string) ($filters['metadataValue'] ?? ''));
-        if ($metadataKey !== null) {
-            $where[] = $this->metadataCondition(
-                $metadataKey,
-                $metadataValue !== '' ? $metadataValue : null,
-                $this->metadataMode($filters['metadataMode'] ?? 'contains', $metadataValue === ''),
-            );
+        if ($includeMetadataFilters) {
+            foreach ($this->metadataFilters($filters) as $metadataFilter) {
+                $where[] = $this->metadataCondition(
+                    $metadataFilter['key'],
+                    $metadataFilter['value'],
+                    $metadataFilter['operator'],
+                );
+            }
         }
 
         if (($durationMin = $this->number($filters['durationMin'] ?? null)) !== null) {
@@ -380,7 +398,12 @@ class ClickHouseLogStorage implements LogStorage
             return 'exists';
         }
 
-        return in_array($mode, ['contains', 'exact'], true) ? $mode : 'contains';
+        return match ($mode) {
+            'eq', 'exact' => 'exact',
+            'ne', 'not' => 'ne',
+            'gt', 'gte', 'lt', 'lte' => $mode,
+            default => 'contains',
+        };
     }
 
     private function metadataCondition(string $key, ?string $value = null, string $mode = 'contains'): string
@@ -403,7 +426,72 @@ class ClickHouseLogStorage implements LogStorage
             return "{$scalar} = {$needle}";
         }
 
+        if ($mode === 'ne') {
+            return "JSON_EXISTS(metadata, {$path}) AND {$scalar} != {$needle}";
+        }
+
+        if (in_array($mode, ['gt', 'gte', 'lt', 'lte'], true)) {
+            $operator = [
+                'gt' => '>',
+                'gte' => '>=',
+                'lt' => '<',
+                'lte' => '<=',
+            ][$mode];
+
+            return "ifNull(toFloat64OrNull({$scalar}), 0) {$operator} ".((float) $value);
+        }
+
         return "(positionCaseInsensitiveUTF8({$scalar}, {$needle}) > 0 OR positionCaseInsensitiveUTF8({$raw}, {$needle}) > 0)";
+    }
+
+    private function metadataFilters(array $filters): array
+    {
+        $items = $filters['metadataFilters'] ?? [];
+
+        if (is_string($items)) {
+            $items = json_decode($items, true) ?: [];
+        }
+
+        $conditions = collect(is_array($items) ? $items : [])
+            ->map(function ($item): ?array {
+                if (! is_array($item)) {
+                    return null;
+                }
+
+                $key = $this->metadataKey($item['key'] ?? '');
+                if ($key === null) {
+                    return null;
+                }
+
+                $value = trim((string) ($item['value'] ?? ''));
+                $operator = $this->metadataMode($item['operator'] ?? $item['mode'] ?? 'contains', $value === '');
+
+                return [
+                    'key' => $key,
+                    'operator' => $operator,
+                    'value' => $value !== '' ? $value : null,
+                ];
+            })
+            ->filter()
+            ->values()
+            ->all();
+
+        if ($conditions !== []) {
+            return $conditions;
+        }
+
+        $metadataKey = $this->metadataKey($filters['metadataKey'] ?? '');
+        $metadataValue = trim((string) ($filters['metadataValue'] ?? ''));
+
+        if ($metadataKey === null) {
+            return [];
+        }
+
+        return [[
+            'key' => $metadataKey,
+            'operator' => $this->metadataMode($filters['metadataMode'] ?? 'contains', $metadataValue === ''),
+            'value' => $metadataValue !== '' ? $metadataValue : null,
+        ]];
     }
 
     private function jsonPath(string $key): string
@@ -439,6 +527,39 @@ class ClickHouseLogStorage implements LogStorage
     private function perPage(mixed $value): int
     {
         return max(10, min(250, (int) ($value ?: 25)));
+    }
+
+    private function buildMetadataSuggestions(array $rows, ?string $key): array
+    {
+        $keys = [];
+        $values = [];
+        $key = $this->metadataKey($key ?? '') ?? null;
+
+        foreach ($rows as $row) {
+            $metadata = $row['metadata'] ?? [];
+            $metadata = is_string($metadata) ? json_decode($metadata, true) : $metadata;
+
+            if (! is_array($metadata)) {
+                continue;
+            }
+
+            foreach ($this->flattenMetadata($metadata) as $path => $value) {
+                $keys[$path] = ($keys[$path] ?? 0) + 1;
+
+                if ($key !== null && $path === $key && ! is_array($value) && ! is_object($value)) {
+                    $label = $value === null ? 'null' : (string) $value;
+                    $values[$label] = ($values[$label] ?? 0) + 1;
+                }
+            }
+        }
+
+        arsort($keys);
+        arsort($values);
+
+        return [
+            'keys' => collect($keys)->take(80)->map(fn ($count, $path) => ['key' => $path, 'count' => $count])->values()->all(),
+            'values' => collect($values)->take(80)->map(fn ($count, $value) => ['value' => $value, 'count' => $count])->values()->all(),
+        ];
     }
 
     private function metadata(array $entry): array

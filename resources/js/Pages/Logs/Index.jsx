@@ -4,6 +4,7 @@ import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, router } from '@inertiajs/react';
 import {
     Activity,
+    Bookmark,
     Calendar,
     ChevronDown,
     Copy,
@@ -15,8 +16,10 @@ import {
     MoreHorizontal,
     Plus,
     RotateCcw,
+    Save,
     Search,
     SlidersHorizontal,
+    Trash2,
     X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -32,14 +35,28 @@ const TIMEFRAMES = [
     { value: '7d', label: '7d' },
     { value: '30d', label: '30d' },
 ];
+const METADATA_OPERATORS = [
+    { value: 'contains', label: 'contains' },
+    { value: 'exact', label: '=' },
+    { value: 'ne', label: '!=' },
+    { value: 'gt', label: '>' },
+    { value: 'gte', label: '>=' },
+    { value: 'lt', label: '<' },
+    { value: 'lte', label: '<=' },
+    { value: 'exists', label: 'exists' },
+    { value: 'missing', label: 'missing' },
+];
 
-export default function LogsIndex({ auth, team, filters, summary, logs }) {
+export default function LogsIndex({ auth, team, filters, summary, logs, savedViews = [] }) {
     const [draft, setDraft] = useState(normalizeFilters(filters));
     const [entries, setEntries] = useState(logs.data);
     const [liveSummary, setLiveSummary] = useState(summary);
     const [selectedId, setSelectedId] = useState(null);
     const [tail, setTail] = useState(true);
     const [advancedOpen, setAdvancedOpen] = useState(false);
+    const [saveOpen, setSaveOpen] = useState(false);
+    const [saveName, setSaveName] = useState('');
+    const [suggestions, setSuggestions] = useState({ keys: [], values: [] });
     const [liveCount, setLiveCount] = useState(0);
     const newIdsRef = useRef(new Set());
 
@@ -92,6 +109,34 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
         return () => window.Echo.leave(channelName);
     }, [filters, tail, team?.id]);
 
+    useEffect(() => {
+        if (!advancedOpen) {
+            return undefined;
+        }
+
+        const key = activeMetadataKey(draft);
+        const timer = window.setTimeout(async () => {
+            try {
+                const response = await fetch(route('logs.metadata-suggestions', {
+                    resource: draft.resource || undefined,
+                    resourceMode: draft.resourceMode !== 'exact' ? draft.resourceMode : undefined,
+                    timeframe: draft.timeframe || undefined,
+                    key: key || undefined,
+                }), {
+                    headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                });
+
+                if (response.ok) {
+                    setSuggestions(await response.json());
+                }
+            } catch {
+                setSuggestions({ keys: [], values: [] });
+            }
+        }, 180);
+
+        return () => window.clearTimeout(timer);
+    }, [advancedOpen, draft.resource, draft.resourceMode, draft.timeframe, draft.metadataFilters, draft.metadataKey]);
+
     const counts = useMemo(() => {
         const levels = liveSummary.levels || {};
         const normalized = { all: liveSummary.total || 0 };
@@ -108,6 +153,29 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
     const visibleEntries = entries.slice(0, 250);
 
     const updateDraft = (key, value) => setDraft((current) => ({ ...current, [key]: value }));
+    const updateMetadataFilter = (index, key, value) => {
+        setDraft((current) => {
+            const filters = metadataFilters(current).map((filter) => ({ ...filter }));
+            filters[index] = { ...(filters[index] || emptyMetadataFilter()), [key]: value };
+
+            return { ...current, metadataFilters: filters, metadataKey: '', metadataValue: '', metadataMode: 'contains' };
+        });
+    };
+    const addMetadataFilter = (filter = emptyMetadataFilter()) => {
+        setDraft((current) => ({
+            ...current,
+            metadataFilters: [...metadataFilters(current), filter],
+            metadataKey: '',
+            metadataValue: '',
+            metadataMode: 'contains',
+        }));
+    };
+    const removeMetadataFilter = (index) => {
+        setDraft((current) => ({
+            ...current,
+            metadataFilters: metadataFilters(current).filter((_, itemIndex) => itemIndex !== index),
+        }));
+    };
 
     const navigate = (next, options = {}) => {
         const params = serializeFilters(next);
@@ -152,6 +220,22 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
         window.location.assign(route('logs.export', { ...serializeFilters(draft), format }));
     };
 
+    const saveView = (event) => {
+        event.preventDefault();
+
+        router.post(route('logs.saved-views.store'), {
+            name: saveName || suggestedViewName(draft),
+            filters: serializeFilters(draft),
+            pinned: true,
+        }, {
+            preserveScroll: true,
+            onSuccess: () => {
+                setSaveName('');
+                setSaveOpen(false);
+            },
+        });
+    };
+
     const traceLog = (log) => {
         const traceId = requestId(log);
 
@@ -172,9 +256,17 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
             ...draft,
             q: '',
             qMode: 'all',
-            metadataKey: path,
-            metadataValue: hasValue ? String(value) : '',
-            metadataMode: hasValue ? 'exact' : 'exists',
+            metadataKey: '',
+            metadataValue: '',
+            metadataMode: 'contains',
+            metadataFilters: [
+                ...metadataFilters(draft),
+                {
+                    key: path,
+                    operator: hasValue ? 'exact' : 'exists',
+                    value: hasValue ? String(value) : '',
+                },
+            ],
         });
     };
 
@@ -200,10 +292,34 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
                             <FileJson className="h-3.5 w-3.5" />
                             JSON
                         </button>
+                        <button type="button" className="fb-button sm" onClick={() => setSaveOpen((value) => !value)}>
+                            <Save className="h-3.5 w-3.5" />
+                            Save view
+                        </button>
                         <Badge>{liveSummary.driver === 'clickhouse' ? 'ClickHouse' : 'Database'} storage</Badge>
                         <Badge variant={liveCount > 0 ? 'green' : 'default'}>{liveCount > 0 ? `+${liveCount} live` : 'Live ready'}</Badge>
                     </div>
                 </div>
+
+                {saveOpen && (
+                    <form className="fb-save-view" onSubmit={saveView}>
+                        <Bookmark className="h-4 w-4 fb-dim" />
+                        <input
+                            value={saveName}
+                            onChange={(event) => setSaveName(event.target.value)}
+                            placeholder={suggestedViewName(draft)}
+                            maxLength={80}
+                            autoFocus
+                        />
+                        <button type="submit" className="fb-button sm primary">
+                            <Save className="h-3.5 w-3.5" />
+                            Save
+                        </button>
+                        <button type="button" className="fb-button sm icon" onClick={() => setSaveOpen(false)}>
+                            <X className="h-3.5 w-3.5" />
+                        </button>
+                    </form>
+                )}
 
                 <div className="fb-logs-kpis">
                     <LogsKpi
@@ -239,6 +355,17 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
                         sparkColor="var(--lvl-warn)"
                     />
                 </div>
+
+                {savedViews.length > 0 && (
+                    <div className="fb-saved-views">
+                        <span><Bookmark className="h-3.5 w-3.5" /> Saved views</span>
+                        {savedViews.map((view) => (
+                            <button key={view.id} type="button" onClick={() => navigate(normalizeFilters(view.filters || {}))}>
+                                {view.name}
+                            </button>
+                        ))}
+                    </div>
+                )}
 
                 <div className="fb-rate-panel">
                     <div className="fb-rate-head">
@@ -302,20 +429,15 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
                         </button>
                     )}
 
-                    {draft.metadataKey && (
+                    {metadataFilters(draft).length > 0 && (
                         <button
                             type="button"
                             className="fb-chip active"
-                            onClick={() => navigate({ ...draft, metadataKey: '', metadataValue: '', metadataMode: 'contains' })}
+                            onClick={() => navigate({ ...draft, metadataFilters: [], metadataKey: '', metadataValue: '', metadataMode: 'contains' })}
                             title="Clear metadata filter"
                         >
                             <Filter className="h-3 w-3" />
-                            meta.{draft.metadataKey}
-                            {draft.metadataMode === 'missing'
-                                ? ' missing'
-                                : draft.metadataMode === 'exists' || !draft.metadataValue
-                                    ? ' exists'
-                                    : ` = ${draft.metadataValue}`}
+                            {metadataFilters(draft).length} metadata filter{metadataFilters(draft).length > 1 ? 's' : ''}
                             <X className="h-3 w-3" />
                         </button>
                     )}
@@ -400,9 +522,13 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
                             draft={draft}
                             resources={liveSummary.resources || []}
                             onChange={updateDraft}
+                            onMetadataChange={updateMetadataFilter}
+                            onMetadataAdd={addMetadataFilter}
+                            onMetadataRemove={removeMetadataFilter}
                             onApply={submitFilters}
                             onExport={exportLogs}
                             onClear={clearFilters}
+                            suggestions={suggestions}
                         />
                     )}
                 </form>
@@ -465,7 +591,9 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
     );
 }
 
-function AdvancedFilters({ draft, resources, onChange, onExport, onClear }) {
+function AdvancedFilters({ draft, resources, onChange, onMetadataChange, onMetadataAdd, onMetadataRemove, onExport, onClear, suggestions }) {
+    const conditions = metadataFilters(draft);
+
     return (
         <div className="fb-advanced-filters">
             <div className="fb-advanced-head">
@@ -538,26 +666,6 @@ function AdvancedFilters({ draft, resources, onChange, onExport, onClear }) {
                 </label>
 
                 <label className="fb-advanced-field">
-                    Metadata key
-                    <input value={draft.metadataKey} placeholder="charId, action, atmCoords.x" onChange={(event) => onChange('metadataKey', event.target.value)} />
-                </label>
-
-                <label className="fb-advanced-field">
-                    Metadata value
-                    <input value={draft.metadataValue} placeholder="1, rope_completed, 285.34" onChange={(event) => onChange('metadataValue', event.target.value)} />
-                </label>
-
-                <label className="fb-advanced-field">
-                    Metadata mode
-                    <select value={draft.metadataMode} onChange={(event) => onChange('metadataMode', event.target.value)}>
-                        <option value="contains">Contains</option>
-                        <option value="exact">Exact match</option>
-                        <option value="exists">Key exists</option>
-                        <option value="missing">Key missing</option>
-                    </select>
-                </label>
-
-                <label className="fb-advanced-field">
                     Min duration ms
                     <input type="number" min="0" value={draft.durationMin} placeholder="200" onChange={(event) => onChange('durationMin', event.target.value)} />
                 </label>
@@ -586,6 +694,78 @@ function AdvancedFilters({ draft, resources, onChange, onExport, onClear }) {
                         <option value="250">250</option>
                     </select>
                 </label>
+
+                <label className="fb-advanced-field fb-advanced-wide">
+                    Export metadata columns
+                    <input value={draft.metadataColumns} placeholder="charId, action, cash, atmCoords.x" onChange={(event) => onChange('metadataColumns', event.target.value)} />
+                </label>
+            </div>
+
+            <div className="fb-query-builder">
+                <div className="fb-query-builder-head">
+                    <div>
+                        <strong>Metadata query builder</strong>
+                        <span>Combine nested metadata conditions with AND logic.</span>
+                    </div>
+                    <button type="button" className="fb-button sm" onClick={() => onMetadataAdd()}>
+                        <Plus className="h-3.5 w-3.5" />
+                        Condition
+                    </button>
+                </div>
+
+                <datalist id="fb-metadata-keys">
+                    {(suggestions.keys || []).map((item) => <option key={item.key} value={item.key}>{item.count}</option>)}
+                </datalist>
+                <datalist id="fb-metadata-values">
+                    {(suggestions.values || []).map((item) => <option key={item.value} value={item.value}>{item.count}</option>)}
+                </datalist>
+
+                {conditions.length === 0 ? (
+                    <div className="fb-query-empty">
+                        <button type="button" onClick={() => onMetadataAdd({ key: 'charId', operator: 'exact', value: '1' })}>charId = 1</button>
+                        <button type="button" onClick={() => onMetadataAdd({ key: 'action', operator: 'exact', value: 'rope_completed' })}>action = rope_completed</button>
+                        <button type="button" onClick={() => onMetadataAdd({ key: 'cash', operator: 'gt', value: '100' })}>cash &gt; 100</button>
+                    </div>
+                ) : (
+                    <div className="fb-query-rows">
+                        {conditions.map((condition, index) => (
+                            <div key={`${condition.key}-${index}`} className="fb-query-row">
+                                <input
+                                    list="fb-metadata-keys"
+                                    value={condition.key}
+                                    placeholder="metadata path"
+                                    onChange={(event) => onMetadataChange(index, 'key', event.target.value)}
+                                />
+                                <select value={condition.operator} onChange={(event) => onMetadataChange(index, 'operator', event.target.value)}>
+                                    {METADATA_OPERATORS.map((operator) => (
+                                        <option key={operator.value} value={operator.value}>{operator.label}</option>
+                                    ))}
+                                </select>
+                                <input
+                                    list="fb-metadata-values"
+                                    value={condition.value}
+                                    placeholder={['exists', 'missing'].includes(condition.operator) ? 'no value needed' : 'value'}
+                                    disabled={['exists', 'missing'].includes(condition.operator)}
+                                    onChange={(event) => onMetadataChange(index, 'value', event.target.value)}
+                                />
+                                <button type="button" className="fb-icon-btn danger" onClick={() => onMetadataRemove(index)} title="Remove condition">
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                {(suggestions.keys || []).length > 0 && (
+                    <div className="fb-query-suggestions">
+                        <span>Keys</span>
+                        {(suggestions.keys || []).slice(0, 12).map((item) => (
+                            <button key={item.key} type="button" onClick={() => onMetadataAdd({ key: item.key, operator: 'exists', value: '' })}>
+                                {item.key} <small>{item.count}</small>
+                            </button>
+                        ))}
+                    </div>
+                )}
             </div>
 
             <div className="fb-advanced-presets">
@@ -890,6 +1070,7 @@ function LevelPill({ level }) {
 
 function normalizeFilters(value = {}) {
     const levels = normalizeLevels(value.levels || value.level);
+    const filters = metadataFilters(value);
 
     return {
         q: value.q || '',
@@ -902,9 +1083,11 @@ function normalizeFilters(value = {}) {
         server: value.server || '',
         player: value.player || '',
         ip: value.ip || '',
-        metadataKey: value.metadataKey || '',
-        metadataValue: value.metadataValue || '',
-        metadataMode: ['contains', 'exact', 'exists', 'missing'].includes(value.metadataMode) ? value.metadataMode : 'contains',
+        metadataKey: filters.length > 0 ? '' : value.metadataKey || '',
+        metadataValue: filters.length > 0 ? '' : value.metadataValue || '',
+        metadataMode: ['contains', 'exact', 'exists', 'missing', 'ne', 'gt', 'gte', 'lt', 'lte'].includes(value.metadataMode) ? value.metadataMode : 'contains',
+        metadataFilters: filters,
+        metadataColumns: Array.isArray(value.metadataColumns) ? value.metadataColumns.join(', ') : value.metadataColumns || '',
         durationMin: value.durationMin || '',
         durationMax: value.durationMax || '',
         from: value.from || '',
@@ -930,6 +1113,8 @@ function defaultFilters() {
         metadataKey: '',
         metadataValue: '',
         metadataMode: 'contains',
+        metadataFilters: [],
+        metadataColumns: '',
         durationMin: '',
         durationMax: '',
         from: '',
@@ -953,6 +1138,7 @@ function normalizeLevels(value) {
 function serializeFilters(value) {
     const filters = normalizeFilters(value);
     const levels = normalizeLevels(filters.levels);
+    const conditions = metadataFilters(filters);
 
     return {
         q: filters.q || undefined,
@@ -965,9 +1151,11 @@ function serializeFilters(value) {
         server: filters.server || undefined,
         player: filters.player || undefined,
         ip: filters.ip || undefined,
-        metadataKey: filters.metadataKey || undefined,
-        metadataValue: filters.metadataValue || undefined,
-        metadataMode: filters.metadataKey && filters.metadataMode !== 'contains' ? filters.metadataMode : undefined,
+        metadataFilters: conditions.length > 0 ? JSON.stringify(conditions) : undefined,
+        metadataKey: conditions.length === 0 ? filters.metadataKey || undefined : undefined,
+        metadataValue: conditions.length === 0 ? filters.metadataValue || undefined : undefined,
+        metadataMode: conditions.length === 0 && filters.metadataKey && filters.metadataMode !== 'contains' ? filters.metadataMode : undefined,
+        metadataColumns: filters.metadataColumns || undefined,
         durationMin: filters.durationMin || undefined,
         durationMax: filters.durationMax || undefined,
         from: filters.from || undefined,
@@ -999,8 +1187,6 @@ function countActiveFilters(value) {
         'server',
         'player',
         'ip',
-        'metadataKey',
-        'metadataValue',
         'durationMin',
         'durationMax',
         'from',
@@ -1009,10 +1195,12 @@ function countActiveFilters(value) {
     ];
     let count = keys.filter((key) => filters[key]).length;
 
+    count += metadataFilters(filters).length;
+    if (metadataFilters(filters).length === 0 && (filters.metadataKey || filters.metadataValue)) count++;
     if (!levels.includes('all')) count++;
     if (filters.qMode !== 'all') count++;
     if (filters.resource && filters.resourceMode !== 'exact') count++;
-    if (filters.metadataKey && filters.metadataMode !== 'contains') count++;
+    if (metadataFilters(filters).length === 0 && filters.metadataKey && filters.metadataMode !== 'contains') count++;
     if (filters.sort !== 'newest') count++;
     if (Number(filters.perPage) !== 25) count++;
 
@@ -1136,7 +1324,14 @@ function matchesFilters(log, filters) {
     if (normalized.player && !metadataValueIncludes(metadata, ['player_id', 'player', 'playerSource', 'player.source', 'player.id', 'charId', 'charName'], normalized.player)) return false;
     if (normalized.ip && !metadataValueIncludes(metadata, ['ip', 'player.ip'], normalized.ip)) return false;
 
-    if (normalized.metadataKey) {
+    const conditions = metadataFilters(normalized);
+    if (conditions.length > 0) {
+        for (const condition of conditions) {
+            if (!metadataConditionMatches(metadata, condition)) {
+                return false;
+            }
+        }
+    } else if (normalized.metadataKey) {
         const value = metadataPath(metadata, normalized.metadataKey);
         const exists = value !== undefined;
 
@@ -1189,6 +1384,95 @@ function metadataValueIncludes(metadata, keys, needle) {
 
         return value !== undefined && String(value).toLowerCase().includes(expected);
     });
+}
+
+function metadataFilters(value = {}) {
+    let source = value.metadataFilters || [];
+
+    if (typeof source === 'string') {
+        try {
+            source = JSON.parse(source);
+        } catch {
+            source = [];
+        }
+    }
+
+    const conditions = Array.isArray(source)
+        ? source
+            .map((condition) => ({
+                key: String(condition?.key || '').trim(),
+                operator: normalizeMetadataOperator(condition?.operator || condition?.mode || 'contains'),
+                value: String(condition?.value ?? ''),
+            }))
+            .filter((condition) => condition.key)
+        : [];
+
+    if (conditions.length > 0) {
+        return conditions;
+    }
+
+    if (value.metadataKey) {
+        return [{
+            key: String(value.metadataKey),
+            operator: normalizeMetadataOperator(value.metadataMode || 'contains'),
+            value: String(value.metadataValue ?? ''),
+        }];
+    }
+
+    return [];
+}
+
+function emptyMetadataFilter() {
+    return { key: '', operator: 'contains', value: '' };
+}
+
+function normalizeMetadataOperator(value) {
+    return ['contains', 'exact', 'exists', 'missing', 'ne', 'gt', 'gte', 'lt', 'lte'].includes(value) ? value : 'contains';
+}
+
+function metadataConditionMatches(metadata, condition) {
+    const value = metadataPath(metadata, condition.key);
+    const exists = value !== undefined;
+    const expected = String(condition.value ?? '');
+
+    if (condition.operator === 'missing') return !exists;
+    if (!exists) return false;
+    if (condition.operator === 'exists' || expected === '') return true;
+    if (condition.operator === 'exact') return String(value) === expected;
+    if (condition.operator === 'ne') return String(value) !== expected;
+
+    if (['gt', 'gte', 'lt', 'lte'].includes(condition.operator)) {
+        const number = Number(value);
+        const target = Number(expected);
+
+        if (Number.isNaN(number) || Number.isNaN(target)) return false;
+        if (condition.operator === 'gt') return number > target;
+        if (condition.operator === 'gte') return number >= target;
+        if (condition.operator === 'lt') return number < target;
+        if (condition.operator === 'lte') return number <= target;
+    }
+
+    return String(value).toLowerCase().includes(expected.toLowerCase());
+}
+
+function activeMetadataKey(filters) {
+    return metadataFilters(filters).find((condition) => condition.key)?.key || filters.metadataKey || '';
+}
+
+function suggestedViewName(filters) {
+    const conditions = metadataFilters(filters);
+
+    if (conditions[0]?.key) {
+        const first = conditions[0];
+
+        return `${first.key} ${first.operator} ${first.value || 'exists'}`;
+    }
+
+    if (filters.resource) return `resource ${filters.resource}`;
+    if (!normalizeLevels(filters.levels).includes('all')) return `${normalizeLevels(filters.levels).join(', ')} logs`;
+    if (filters.q) return `search ${filters.q}`;
+
+    return 'New log view';
 }
 
 function metadataPath(metadata, path) {

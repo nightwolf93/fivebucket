@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Events\LogsIngested;
 use App\Http\Controllers\Controller;
+use App\Jobs\EvaluateLogAlerts;
 use App\Models\ApiToken;
 use App\Models\Team;
 use App\Services\Logs\LogStorage;
@@ -63,6 +64,7 @@ class LogController extends Controller
             $team = $this->team($request);
             $stored = $this->logs->store($team, $this->apiToken($request), $entries);
             $this->broadcastLogs($team, $entries, $stored);
+            $this->evaluateAlerts($team, $stored);
 
             return $this->ok();
         } catch (Throwable $exception) {
@@ -89,6 +91,7 @@ class LogController extends Controller
             $team = $this->team($request);
             $stored = $this->logs->store($team, $this->apiToken($request), $entries);
             $this->broadcastLogs($team, $entries, $stored);
+            $this->evaluateAlerts($team, $stored);
 
             return $this->ok();
         } catch (Throwable $exception) {
@@ -140,6 +143,19 @@ class LogController extends Controller
 
         try {
             event(new LogsIngested($team->id, $logs));
+        } catch (Throwable $exception) {
+            report($exception);
+        }
+    }
+
+    private function evaluateAlerts(Team $team, int $stored): void
+    {
+        if ($stored <= 0 || ! $team->logAlertRules()->where('enabled', true)->exists()) {
+            return;
+        }
+
+        try {
+            EvaluateLogAlerts::dispatch($team->id);
         } catch (Throwable $exception) {
             report($exception);
         }

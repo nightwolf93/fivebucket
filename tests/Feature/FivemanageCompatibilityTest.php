@@ -213,6 +213,7 @@ class FivemanageCompatibilityTest extends TestCase
                     'playerSource' => 42,
                     'charId' => 1,
                     'action' => 'rope_completed',
+                    'cash' => 198,
                     'atmCoords' => [
                         'x' => 285.35,
                         'y' => 142.97,
@@ -255,20 +256,41 @@ class FivemanageCompatibilityTest extends TestCase
             ->assertSee('Trace failure on inventory sync')
             ->assertDontSee('Unrelated heartbeat');
 
+        $conditions = urlencode(json_encode([
+            ['key' => 'charId', 'operator' => 'exact', 'value' => '1'],
+            ['key' => 'action', 'operator' => 'exact', 'value' => 'rope_completed'],
+            ['key' => 'cash', 'operator' => 'gt', 'value' => '100'],
+        ]));
+
+        $this->actingAs($user)
+            ->get('/logs?metadataFilters='.$conditions)
+            ->assertOk()
+            ->assertSee('Trace failure on inventory sync')
+            ->assertDontSee('Unrelated heartbeat');
+
+        $this->actingAs($user)
+            ->get('/logs/metadata/suggestions?key=action')
+            ->assertOk()
+            ->assertJsonFragment(['key' => 'charId'])
+            ->assertJsonFragment(['value' => 'rope_completed']);
+
         $csv = $this->actingAs($user)
-            ->get('/logs/export?levels=error&requestId=req_trace_1&format=csv')
+            ->get('/logs/export?levels=error&requestId=req_trace_1&format=csv&metadataColumns=charId,action,atmCoords.x')
             ->assertOk()
             ->streamedContent();
 
         $this->assertStringContainsString('Trace failure on inventory sync', $csv);
+        $this->assertStringContainsString('metadata.charId', $csv);
+        $this->assertStringContainsString('rope_completed', $csv);
         $this->assertStringNotContainsString('Unrelated heartbeat', $csv);
 
         $json = $this->actingAs($user)
-            ->get('/logs/export?levels=error&requestId=req_trace_1&format=json')
+            ->get('/logs/export?levels=error&requestId=req_trace_1&format=json&metadataColumns=charId,action')
             ->assertOk()
             ->streamedContent();
 
         $this->assertStringContainsString('req_trace_1', $json);
+        $this->assertStringContainsString('metadata.charId', $json);
     }
 
     private function apiKey(): array
