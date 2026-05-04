@@ -1756,8 +1756,8 @@
     .fb-log-viewer {
         display: grid;
         grid-template-columns: minmax(0, 1fr);
-        min-height: 420px;
-        height: calc(100vh - 448px);
+        min-height: 0;
+        height: clamp(420px, calc(100dvh - 300px), 760px);
         overflow: hidden;
         border: 1px solid var(--border);
         border-radius: 0 0 var(--radius-lg) var(--radius-lg);
@@ -1772,7 +1772,10 @@
     .fb-log-table {
         display: flex;
         min-width: 0;
+        min-height: 0;
+        height: 100%;
         flex-direction: column;
+        overflow: hidden;
         border-right: 1px solid transparent;
     }
 
@@ -1805,7 +1808,10 @@
 
     .fb-log-rows {
         flex: 1;
+        min-height: 0;
         overflow: auto;
+        overscroll-behavior: contain;
+        scrollbar-gutter: stable;
         font-family: var(--font-mono);
         font-size: 12px;
     }
@@ -1982,6 +1988,7 @@
 
     .fb-log-footer {
         display: flex;
+        flex: 0 0 auto;
         align-items: center;
         gap: 12px;
         border-top: 1px solid var(--border);
@@ -2019,6 +2026,7 @@
     .fb-log-detail {
         display: flex;
         min-width: 0;
+        min-height: 0;
         height: 100%;
         flex-direction: column;
         overflow: hidden;
@@ -2027,6 +2035,7 @@
 
     .fb-log-detail-head {
         display: flex;
+        flex: 0 0 auto;
         align-items: center;
         gap: 10px;
         border-bottom: 1px solid var(--border);
@@ -2052,7 +2061,10 @@
 
     .fb-log-detail-body {
         flex: 1;
+        min-height: 0;
         overflow: auto;
+        overscroll-behavior: contain;
+        scrollbar-gutter: stable;
         padding: 14px;
     }
 
