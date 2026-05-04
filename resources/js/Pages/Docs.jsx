@@ -1,8 +1,10 @@
 import ApplicationLogo from '@/Components/ApplicationLogo';
+import { PageHeader } from '@/Components/Design';
 import ThemeToggle from '@/Components/ThemeToggle';
 import { Badge } from '@/Components/ui/badge';
 import { Button } from '@/Components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/Components/ui/card';
+import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, Link } from '@inertiajs/react';
 import { BookOpen, Copy, KeyRound, ScrollText, UploadCloud } from 'lucide-react';
 
@@ -110,9 +112,18 @@ Content-Type: application/json
 };
 
 export default function Docs({ auth }) {
+    if (auth.user) {
+        return (
+            <AuthenticatedLayout user={auth.user}>
+                <Head title="Documentation" />
+                <DocsPage dashboard />
+            </AuthenticatedLayout>
+        );
+    }
+
     return (
         <div className="min-h-screen bg-[var(--app-bg)] text-[var(--fg)]">
-            <Head title="API Docs" />
+            <Head title="Documentation" />
 
             <nav className="border-b border-[var(--border)] bg-[var(--surface)]">
                 <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
@@ -130,18 +141,35 @@ export default function Docs({ auth }) {
                 </div>
             </nav>
 
-            <div className="mx-auto grid max-w-7xl gap-8 px-4 py-8 sm:px-6 lg:grid-cols-[240px_1fr] lg:px-8">
-                <aside className="hidden lg:block">
-                    <div className="sticky top-8 space-y-2">
-                        {sections.map((section) => (
-                            <a key={section.id} href={`#${section.id}`} className="block rounded-md px-3 py-2 text-[12px] font-medium fb-muted text-decoration-none hover:bg-[var(--surface)] hover:text-[var(--fg)]">
-                                {section.label}
-                            </a>
-                        ))}
-                    </div>
-                </aside>
+            <DocsPage />
+        </div>
+    );
+}
 
-                <main className="space-y-8">
+function DocsPage({ dashboard = false }) {
+    return (
+        <div className={dashboard ? 'fb-page fb-docs-page' : 'mx-auto grid max-w-7xl gap-8 px-4 py-8 sm:px-6 lg:grid-cols-[240px_1fr] lg:px-8'}>
+            {dashboard && (
+                <PageHeader
+                    eyebrow="Resource"
+                    title="Documentation"
+                    description="Routes, request formats, response envelopes, and examples for media hosting, logs, presigned uploads, and SDK endpoints."
+                    actions={<Badge>Fivemanage compatible</Badge>}
+                />
+            )}
+
+            <aside className={dashboard ? 'fb-docs-sidebar' : 'hidden lg:block'}>
+                <div className={dashboard ? 'fb-docs-nav' : 'sticky top-8 space-y-2'}>
+                    {sections.map((section) => (
+                        <a key={section.id} href={`#${section.id}`} className={dashboard ? 'fb-docs-nav-item' : 'block rounded-md px-3 py-2 text-[12px] font-medium fb-muted text-decoration-none hover:bg-[var(--surface)] hover:text-[var(--fg)]'}>
+                            {section.label}
+                        </a>
+                    ))}
+                </div>
+            </aside>
+
+            <main className={dashboard ? 'fb-docs-main' : 'space-y-8'}>
+                {!dashboard && (
                     <header>
                         <Badge>Fivemanage compatible</Badge>
                         <h1 className="fb-page-title mt-4">FiveBucket API Docs</h1>
@@ -149,69 +177,69 @@ export default function Docs({ auth }) {
                             Routes, request formats, response envelopes, and examples for media hosting, logs, presigned uploads, and SDK endpoints.
                         </p>
                     </header>
+                )}
 
-                    <Section id="auth" icon={KeyRound} title="Authentication">
-                        <p className="text-[12px] leading-6 fb-muted">
-                            Every protected API route accepts the API key either as the raw `Authorization` header or as the `apiKey` query parameter.
-                        </p>
-                        <div className="grid gap-4 md:grid-cols-2">
-                            <CodeBlock language="http" code={`Authorization: fbk_xxxxxxxxxxxxxxxxx`} />
-                            <CodeBlock language="http" code={`GET /api/v3/file?apiKey=fbk_xxxxxxxxxxxxxxxxx`} />
-                        </div>
-                    </Section>
+                <Section id="auth" icon={KeyRound} title="Authentication">
+                    <p className="text-[12px] leading-6 fb-muted">
+                        Every protected API route accepts the API key either as the raw `Authorization` header or as the `apiKey` query parameter.
+                    </p>
+                    <div className="grid gap-4 md:grid-cols-2">
+                        <CodeBlock language="http" code={`Authorization: fbk_xxxxxxxxxxxxxxxxx`} />
+                        <CodeBlock language="http" code={`GET /api/v3/file?apiKey=fbk_xxxxxxxxxxxxxxxxx`} />
+                    </div>
+                </Section>
 
-                    <Section id="media" icon={UploadCloud} title="Media API">
-                        <Endpoint method="GET" path="/api/v3/file" description="List uploaded media files for the current team." />
-                        <Endpoint method="POST" path="/api/v3/file" description="Upload images, videos, audio, or arbitrary files with multipart form data." />
-                        <Endpoint method="POST" path="/api/v3/file/base64" description="Upload a base64 encoded file." />
-                        <Endpoint method="GET" path="/api/v3/file/presigned-url" description="Generate a temporary browser upload URL." />
-                        <Endpoint method="POST" path="/api/v3/file/presigned-url/{token}" description="Upload to a generated presigned URL without exposing the API key." />
-                        <Endpoint method="GET" path="/api/v3/file/{id}" description="Fetch one file metadata record." />
-                        <Endpoint method="DELETE" path="/api/v3/file/{id}" description="Delete one media record and its R2 object." />
+                <Section id="media" icon={UploadCloud} title="Media API">
+                    <Endpoint method="GET" path="/api/v3/file" description="List uploaded media files for the current team." />
+                    <Endpoint method="POST" path="/api/v3/file" description="Upload images, videos, audio, or arbitrary files with multipart form data." />
+                    <Endpoint method="POST" path="/api/v3/file/base64" description="Upload a base64 encoded file." />
+                    <Endpoint method="GET" path="/api/v3/file/presigned-url" description="Generate a temporary browser upload URL." />
+                    <Endpoint method="POST" path="/api/v3/file/presigned-url/{token}" description="Upload to a generated presigned URL without exposing the API key." />
+                    <Endpoint method="GET" path="/api/v3/file/{id}" description="Fetch one file metadata record." />
+                    <Endpoint method="DELETE" path="/api/v3/file/{id}" description="Delete one media record and its R2 object." />
 
-                        <Grid>
-                            <Example title="Multipart upload" code={examples.multipart} language="http" />
-                            <Example title="Upload response" code={examples.uploadResponse} language="json" />
-                            <Example title="Base64 upload" code={examples.base64} language="http" />
-                            <Example title="List response" code={examples.listResponse} language="json" />
-                        </Grid>
-                    </Section>
+                    <Grid>
+                        <Example title="Multipart upload" code={examples.multipart} language="http" />
+                        <Example title="Upload response" code={examples.uploadResponse} language="json" />
+                        <Example title="Base64 upload" code={examples.base64} language="http" />
+                        <Example title="List response" code={examples.listResponse} language="json" />
+                    </Grid>
+                </Section>
 
-                    <Section id="logs" icon={ScrollText} title="Logs API">
-                        <Endpoint method="POST" path="/api/logs" description="Legacy-compatible ingest route. Accepts one object or an array." />
-                        <Endpoint method="POST" path="/api/v3/logs" description="Batch log ingest route. Accepts an array of log entries." />
-                        <Endpoint method="POST" path="/api/v3/logs/discord" description="Discord webhook compatible ingest route." />
+                <Section id="logs" icon={ScrollText} title="Logs API">
+                    <Endpoint method="POST" path="/api/logs" description="Legacy-compatible ingest route. Accepts one object or an array." />
+                    <Endpoint method="POST" path="/api/v3/logs" description="Batch log ingest route. Accepts an array of log entries." />
+                    <Endpoint method="POST" path="/api/v3/logs/discord" description="Discord webhook compatible ingest route." />
 
-                        <Grid>
-                            <Example title="Batch logs" code={examples.logs} language="http" />
-                            <Example title="Discord webhook logs" code={examples.discord} language="http" />
-                        </Grid>
-                    </Section>
+                    <Grid>
+                        <Example title="Batch logs" code={examples.logs} language="http" />
+                        <Example title="Discord webhook logs" code={examples.discord} language="http" />
+                    </Grid>
+                </Section>
 
-                    <Section id="sdk" icon={BookOpen} title="SDK Endpoints">
-                        <Endpoint method="POST" path="/api/sdk/report" description="Report resource/version metadata from a FiveM resource." />
-                        <Endpoint method="POST" path="/api/sdk/heartbeat" description="Public heartbeat endpoint used by SDK clients." />
-                        <Endpoint method="POST" path="/api/sdk/invalidate" description="Invalidate SDK session state." />
-                        <Example title="SDK report" code={examples.sdk} language="http" />
-                    </Section>
+                <Section id="sdk" icon={BookOpen} title="SDK Endpoints">
+                    <Endpoint method="POST" path="/api/sdk/report" description="Report resource/version metadata from a FiveM resource." />
+                    <Endpoint method="POST" path="/api/sdk/heartbeat" description="Public heartbeat endpoint used by SDK clients." />
+                    <Endpoint method="POST" path="/api/sdk/invalidate" description="Invalidate SDK session state." />
+                    <Example title="SDK report" code={examples.sdk} language="http" />
+                </Section>
 
-                    <Section id="errors" title="Responses & Errors">
-                        <p className="text-[12px] leading-6 fb-muted">
-                            Successful responses use <code>{"{\"status\": \"ok\"}"}</code>. Failed responses use{' '}
-                            <code>{"{\"status\": \"error\"}"}</code> and a human-readable message.
-                        </p>
-                        <div className="grid gap-4 md:grid-cols-3">
-                            <Status code="200" label="OK" detail="Request accepted or file returned." />
-                            <Status code="400" label="Bad Request" detail="Invalid payload or missing file." />
-                            <Status code="401" label="Unauthorized" detail="Missing or invalid API key." />
-                            <Status code="403" label="Forbidden" detail="API key does not have the required scope." />
-                            <Status code="404" label="Not Found" detail="Media, token, or route not found." />
-                            <Status code="500" label="Server Error" detail="Unexpected storage or application failure." />
-                        </div>
-                        <Example title="Error envelope" code={examples.error} language="json" />
-                    </Section>
-                </main>
-            </div>
+                <Section id="errors" title="Responses & Errors">
+                    <p className="text-[12px] leading-6 fb-muted">
+                        Successful responses use <code>{"{\"status\": \"ok\"}"}</code>. Failed responses use{' '}
+                        <code>{"{\"status\": \"error\"}"}</code> and a human-readable message.
+                    </p>
+                    <div className="grid gap-4 md:grid-cols-3">
+                        <Status code="200" label="OK" detail="Request accepted or file returned." />
+                        <Status code="400" label="Bad Request" detail="Invalid payload or missing file." />
+                        <Status code="401" label="Unauthorized" detail="Missing or invalid API key." />
+                        <Status code="403" label="Forbidden" detail="API key does not have the required scope." />
+                        <Status code="404" label="Not Found" detail="Media, token, or route not found." />
+                        <Status code="500" label="Server Error" detail="Unexpected storage or application failure." />
+                    </div>
+                    <Example title="Error envelope" code={examples.error} language="json" />
+                </Section>
+            </main>
         </div>
     );
 }
