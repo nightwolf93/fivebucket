@@ -110,6 +110,7 @@ class ClickHouseLogStorage implements LogStorage
                 'resource' => $row['resource'],
                 'count' => (int) $row['aggregate'],
             ])->all(),
+            'rateBuckets' => $this->rateBuckets($team),
         ];
     }
 
@@ -143,6 +144,56 @@ class ClickHouseLogStorage implements LogStorage
         $response->throw();
 
         return $json ? ($response->json() ?: []) : [];
+    }
+
+    private function rateBuckets(Team $team): array
+    {
+        $teamId = (int) $team->id;
+        $start = now()->subMinutes(59)->startOfMinute();
+        $table = $this->table();
+
+        $rows = $this->query(
+            "SELECT
+                formatDateTime(toStartOfMinute(occurred_at), '%Y-%m-%d %H:%i:00') AS minute,
+                count() AS total,
+                countIf(level = 'debug') AS debug,
+                countIf(level = 'info') AS info,
+                countIf(level IN ('warn', 'warning')) AS warn,
+                countIf(level = 'error') AS error,
+                countIf(level = 'fatal') AS fatal
+            FROM {$table}
+            WHERE team_id = {$teamId}
+                AND occurred_at >= toDateTime64(".$this->quote($start->format('Y-m-d H:i:s.v')).", 3)
+            GROUP BY minute
+            ORDER BY minute ASC"
+        )['data'] ?? [];
+
+        $indexed = collect($rows)->keyBy('minute');
+        $buckets = [];
+
+        for ($i = 0; $i < 60; $i++) {
+            $minute = $start->copy()->addMinutes($i);
+            $key = $minute->format('Y-m-d H:i:00');
+            $row = $indexed->get($key, []);
+            $warn = (int) ($row['warn'] ?? 0);
+            $error = (int) ($row['error'] ?? 0);
+            $fatal = (int) ($row['fatal'] ?? 0);
+
+            $buckets[] = [
+                'minute' => $minute->toIso8601String(),
+                'label' => $minute->format('H:i'),
+                'total' => (int) ($row['total'] ?? 0),
+                'debug' => (int) ($row['debug'] ?? 0),
+                'info' => (int) ($row['info'] ?? 0),
+                'warn' => $warn,
+                'error' => $error,
+                'fatal' => $fatal,
+                'hasWarn' => $warn > 0,
+                'hasError' => ($error + $fatal) > 0,
+            ];
+        }
+
+        return $buckets;
     }
 
     private function whereClause(Team $team, array $filters): string

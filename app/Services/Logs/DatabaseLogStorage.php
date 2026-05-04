@@ -96,6 +96,7 @@ class DatabaseLogStorage implements LogStorage
             'warnings24h' => $team->logEntries()->whereIn('level', ['warn', 'warning'])->where('occurred_at', '>=', $lastDay)->count(),
             'levels' => $levels,
             'resources' => $resources,
+            'rateBuckets' => $this->rateBuckets($team),
         ];
     }
 
@@ -139,6 +140,55 @@ class DatabaseLogStorage implements LogStorage
         if ($to = $this->timestamp($filters['to'] ?? null)) {
             $query->where('occurred_at', '<=', $to);
         }
+    }
+
+    private function rateBuckets(Team $team): array
+    {
+        $start = now()->subMinutes(59)->startOfMinute();
+        $end = now()->endOfMinute();
+        $buckets = [];
+
+        for ($i = 0; $i < 60; $i++) {
+            $minute = $start->copy()->addMinutes($i);
+
+            $buckets[$i] = [
+                'minute' => $minute->toIso8601String(),
+                'label' => $minute->format('H:i'),
+                'total' => 0,
+                'debug' => 0,
+                'info' => 0,
+                'warn' => 0,
+                'error' => 0,
+                'fatal' => 0,
+                'hasWarn' => false,
+                'hasError' => false,
+            ];
+        }
+
+        $team->logEntries()
+            ->whereBetween('occurred_at', [$start, $end])
+            ->get(['level', 'occurred_at'])
+            ->each(function (LogEntry $log) use (&$buckets, $start): void {
+                if (! $log->occurred_at) {
+                    return;
+                }
+
+                $index = (int) floor($start->diffInSeconds($log->occurred_at->copy()->startOfMinute(), false) / 60);
+
+                if ($index < 0 || $index >= 60) {
+                    return;
+                }
+
+                $level = $this->normalizeLevel((string) $log->level);
+                $level = array_key_exists($level, $buckets[$index]) ? $level : 'info';
+
+                $buckets[$index]['total']++;
+                $buckets[$index][$level]++;
+                $buckets[$index]['hasWarn'] = $buckets[$index]['hasWarn'] || $level === 'warn';
+                $buckets[$index]['hasError'] = $buckets[$index]['hasError'] || in_array($level, ['error', 'fatal'], true);
+            });
+
+        return array_values($buckets);
     }
 
     private function metadata(array $entry): array
