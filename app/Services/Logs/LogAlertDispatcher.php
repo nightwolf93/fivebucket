@@ -30,7 +30,14 @@ class LogAlertDispatcher
             return false;
         }
 
-        $description = $this->renderMessage($rule, $count);
+        $description = $this->renderAlertMessage(
+            $rule->message_template,
+            $rule->name,
+            $count,
+            $rule->threshold_count,
+            $rule->window_minutes,
+            $samples[0] ?? [],
+        );
         $fields = [
             ['name' => 'Count', 'value' => (string) $count, 'inline' => true],
             ['name' => 'Threshold', 'value' => (string) $rule->threshold_count, 'inline' => true],
@@ -91,20 +98,93 @@ class LogAlertDispatcher
         }
     }
 
-    private function renderMessage(LogAlertRule $rule, int $count): string
+    public function renderAlertMessage(?string $template, string $name, int $count, int $threshold, int $window, array $sample = []): string
     {
-        $template = trim((string) $rule->message_template);
+        $template = trim((string) $template);
 
         if ($template === '') {
-            return "Rule `{$rule->name}` matched {$count} logs.";
+            return "Rule `{$name}` matched {$count} logs.";
         }
 
-        return strtr($template, [
-            '{name}' => $rule->name,
-            '{count}' => (string) $count,
-            '{threshold}' => (string) $rule->threshold_count,
-            '{window}' => (string) $rule->window_minutes,
-        ]);
+        $context = $this->placeholderContext($name, $count, $threshold, $window, $sample);
+        $message = preg_replace_callback('/\{([A-Za-z0-9_.-]+)\}/', function (array $matches) use ($context): string {
+            $key = $matches[1];
+
+            return array_key_exists($key, $context) ? $this->stringifyPlaceholder($context[$key]) : $matches[0];
+        }, $template) ?? $template;
+
+        return substr($message, 0, 3900);
+    }
+
+    private function placeholderContext(string $name, int $count, int $threshold, int $window, array $sample): array
+    {
+        $context = [
+            'name' => $name,
+            'count' => $count,
+            'threshold' => $threshold,
+            'window' => $window,
+        ];
+
+        foreach (['id', 'level', 'message', 'resource', 'occurredAt', 'occurredAtIso', 'createdAt'] as $key) {
+            if (array_key_exists($key, $sample)) {
+                $context[$key] = $sample[$key];
+                $context['log.'.$key] = $sample[$key];
+                $context['sample.'.$key] = $sample[$key];
+            }
+        }
+
+        $metadata = $sample['metadata'] ?? [];
+        if (is_array($metadata)) {
+            $context['metadata'] = $metadata;
+            $context['meta'] = $metadata;
+
+            foreach ($this->flatten($metadata) as $path => $value) {
+                $context['metadata.'.$path] = $value;
+                $context['meta.'.$path] = $value;
+
+                if (! array_key_exists($path, $context)) {
+                    $context[$path] = $value;
+                }
+            }
+        }
+
+        return $context;
+    }
+
+    private function flatten(array $items, string $prefix = ''): array
+    {
+        $flattened = [];
+
+        foreach ($items as $key => $value) {
+            $path = $prefix === '' ? (string) $key : $prefix.'.'.$key;
+
+            if (is_array($value)) {
+                $flattened += $this->flatten($value, $path);
+
+                continue;
+            }
+
+            $flattened[$path] = $value;
+        }
+
+        return $flattened;
+    }
+
+    private function stringifyPlaceholder(mixed $value): string
+    {
+        if ($value === null) {
+            return '';
+        }
+
+        if (is_bool($value)) {
+            return $value ? 'true' : 'false';
+        }
+
+        if (is_array($value) || is_object($value)) {
+            return substr(json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '', 0, 800);
+        }
+
+        return (string) $value;
     }
 
     private function sampleText(array $sample): string

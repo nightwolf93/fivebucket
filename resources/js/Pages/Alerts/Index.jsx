@@ -59,11 +59,15 @@ export default function AlertsIndex({ auth, team, rules, webhooks }) {
     }, []);
 
     const metadataFields = useMemo(() => flattenMetadata(sourceLog?.metadata || {}).slice(0, 80), [sourceLog]);
+    const templateTokens = useMemo(() => templatePlaceholders(sourceLog, metadataFields), [sourceLog, metadataFields]);
     const activeFilters = useMemo(() => alertFilters(form.data, conditions), [form.data, conditions]);
     const filterText = useMemo(() => filterSummary(activeFilters), [activeFilters]);
     const sampleMatch = sourceLog ? matchesAlertLog(sourceLog, activeFilters) : null;
     const previewSignature = JSON.stringify({
         filters: activeFilters,
+        name: form.data.name,
+        message_template: form.data.message_template,
+        sample: sourceLog,
         threshold_count: Number(form.data.threshold_count) || 1,
         window_minutes: Number(form.data.window_minutes) || 1,
     });
@@ -98,7 +102,8 @@ export default function AlertsIndex({ auth, team, rules, webhooks }) {
         form.transform((data) => ({
             ...data,
             filters: alertFilters(data, conditions),
-        })).post(route('alerts.store'), {
+        }));
+        form.post(route('alerts.store'), {
             preserveScroll: true,
         });
     };
@@ -157,6 +162,11 @@ export default function AlertsIndex({ auth, team, rules, webhooks }) {
         form.setData('resource', '');
         form.setData('q', '');
         form.setData('qMode', 'all');
+        form.setData('message_template', 'FiveBucket matched {count} logs for {name} in the last {window} minutes.');
+    };
+
+    const insertTemplateToken = (token) => {
+        form.setData('message_template', appendTemplateToken(form.data.message_template, token));
     };
 
     return (
@@ -193,6 +203,12 @@ export default function AlertsIndex({ auth, team, rules, webhooks }) {
                     {webhooks.length === 0 && (
                         <div className="fb-alert warning mx-[14px] mt-[14px]">
                             Create a Discord webhook endpoint before saving alert rules.
+                        </div>
+                    )}
+
+                    {form.hasErrors && (
+                        <div className="fb-alert danger mx-[14px] mt-[14px]">
+                            Alert not saved. Check the highlighted fields and try again.
                         </div>
                     )}
 
@@ -347,9 +363,22 @@ export default function AlertsIndex({ auth, team, rules, webhooks }) {
                                 </Field>
                             </div>
 
-                            <Field label="Discord message template">
+                            <Field label="Discord message template" error={form.errors.message_template}>
                                 <textarea className="fb-textarea" value={form.data.message_template} onChange={(event) => form.setData('message_template', event.target.value)} />
                             </Field>
+                            <div className="fb-template-tools">
+                                <div>
+                                    <strong>Insert variables</strong>
+                                    <span>Use metadata directly with {'{charId}'} or explicitly with {'{metadata.charId}'}.</span>
+                                </div>
+                                <div className="fb-template-token-list">
+                                    {templateTokens.map((token) => (
+                                        <button key={token} type="button" onClick={() => insertTemplateToken(token)}>
+                                            {'{'}{token}{'}'}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
                         </section>
                     </div>
 
@@ -371,6 +400,13 @@ export default function AlertsIndex({ auth, team, rules, webhooks }) {
                         </div>
 
                         {preview.error && <div className="fb-alert warning">{preview.error}</div>}
+
+                        {preview.renderedMessage && (
+                            <div className="fb-template-preview">
+                                <span>Discord message</span>
+                                <p>{preview.renderedMessage}</p>
+                            </div>
+                        )}
 
                         {preview.samples?.length > 0 && (
                             <div className="fb-alert-samples">
@@ -538,6 +574,7 @@ function buildSeedFromLog(log) {
             threshold_count: 1,
             window_minutes: 5,
             cooldown_minutes: 10,
+            message_template: templateFromLog(log),
         },
         conditions,
     };
@@ -578,6 +615,36 @@ function flattenMetadata(value, prefix = '') {
 
         return [];
     });
+}
+
+function templateFromLog(log) {
+    const metadata = log.metadata || {};
+    const parts = ['{message}', 'resource={resource}'];
+
+    ['action', 'charId', 'cash', 'source'].forEach((path) => {
+        if (metadataPath(metadata, path) !== undefined) {
+            parts.push(`${path}={${path}}`);
+        }
+    });
+
+    return `FiveBucket alert: ${parts.join(' · ')} · {count} logs in {window}m.`;
+}
+
+function templatePlaceholders(sourceLog, metadataFields) {
+    const base = ['name', 'count', 'threshold', 'window', 'level', 'resource', 'message', 'id', 'occurredAtIso'];
+    const metadata = metadataFields.flatMap((field) => [field.path, `metadata.${field.path}`]);
+
+    return [...new Set([...base, ...metadata])].slice(0, 36);
+}
+
+function appendTemplateToken(template, token) {
+    const text = String(template || '').trimEnd();
+    const placeholder = `{${token}}`;
+
+    if (text === '') return placeholder;
+    if (text.endsWith(':') || text.endsWith('=') || text.endsWith('(')) return `${text}${placeholder}`;
+
+    return `${text} ${placeholder}`;
 }
 
 function matchesAlertLog(log, filters) {

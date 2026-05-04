@@ -47,6 +47,7 @@ class LogAlertingTest extends TestCase
             'window_minutes' => 10,
             'cooldown_minutes' => 0,
             'enabled' => true,
+            'message_template' => 'Exploit {action} from char {charId} with cash {metadata.cash} on {resource}.',
         ]);
 
         LogEntry::create([
@@ -61,7 +62,7 @@ class LogAlertingTest extends TestCase
         EvaluateLogAlerts::dispatchSync($team->id);
 
         Http::assertSent(fn ($request) => str_contains($request->url(), 'discord.com/api/webhooks/123/test-token')
-            && str_contains(json_encode($request->data()), 'Exploit detected'));
+            && str_contains(json_encode($request->data()), 'Exploit exploit_detected from char 1 with cash 250 on nw_illegal.'));
 
         $this->assertNotNull($rule->fresh()->last_triggered_at);
         $this->assertSame(0, $webhook->fresh()->failure_count);
@@ -100,6 +101,8 @@ class LogAlertingTest extends TestCase
 
         $this->actingAs($user)
             ->postJson('/alerts/preview', [
+                'name' => 'ATM completed',
+                'message_template' => 'ATM {action} char={charId} cash={metadata.cash} resource={resource}',
                 'filters' => [
                     'level' => 'info',
                     'resource' => 'nw_illegal',
@@ -115,6 +118,45 @@ class LogAlertingTest extends TestCase
             ->assertOk()
             ->assertJsonPath('count', 1)
             ->assertJsonPath('willTrigger', true)
+            ->assertJsonPath('renderedMessage', 'ATM rope_completed char=1 cash=198 resource=nw_illegal')
             ->assertJsonCount(1, 'samples');
+    }
+
+    public function test_alert_rule_can_be_created_from_dashboard_payload(): void
+    {
+        $user = User::factory()->create();
+        $team = app(TeamProvisioner::class)->createDefaultTeam($user);
+        $webhook = LogWebhookEndpoint::create([
+            'team_id' => $team->id,
+            'name' => 'Discord alerts',
+            'type' => 'discord',
+            'url' => 'https://discord.com/api/webhooks/123/test-token',
+            'enabled' => true,
+        ]);
+
+        $this->actingAs($user)
+            ->post('/alerts', [
+                'name' => 'ATM completed',
+                'log_webhook_endpoint_id' => $webhook->id,
+                'filters' => [
+                    'level' => 'info',
+                    'resource' => 'nw_illegal',
+                    'metadataFilters' => [
+                        ['key' => 'action', 'operator' => 'exact', 'value' => 'rope_completed'],
+                    ],
+                ],
+                'threshold_count' => 1,
+                'window_minutes' => 5,
+                'cooldown_minutes' => 10,
+                'enabled' => true,
+                'message_template' => 'ATM {action} char={charId}',
+            ])
+            ->assertRedirect();
+
+        $this->assertDatabaseHas('log_alert_rules', [
+            'team_id' => $team->id,
+            'name' => 'ATM completed',
+            'message_template' => 'ATM {action} char={charId}',
+        ]);
     }
 }

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Jobs\EvaluateLogAlerts;
 use App\Models\LogAlertRule;
+use App\Services\Logs\LogAlertDispatcher;
 use App\Services\Logs\LogStorage;
 use App\Services\TeamProvisioner;
 use Illuminate\Http\JsonResponse;
@@ -17,6 +18,7 @@ class LogAlertRuleController extends Controller
     public function __construct(
         private readonly TeamProvisioner $teams,
         private readonly LogStorage $logs,
+        private readonly LogAlertDispatcher $dispatcher,
     ) {}
 
     public function index(Request $request): Response
@@ -94,6 +96,9 @@ class LogAlertRuleController extends Controller
         $team = $this->teams->defaultTeamFor($request->user());
         $validated = $request->validate([
             'filters' => ['required', 'array'],
+            'name' => ['nullable', 'string', 'max:100'],
+            'message_template' => ['nullable', 'string', 'max:2000'],
+            'sample' => ['nullable', 'array'],
             'threshold_count' => ['nullable', 'integer', 'min:1', 'max:100000'],
             'window_minutes' => ['nullable', 'integer', 'min:1', 'max:10080'],
         ]);
@@ -108,13 +113,23 @@ class LogAlertRuleController extends Controller
         $filters['sort'] = 'newest';
 
         $count = $this->logs->count($team, $filters);
+        $samples = $this->logs->export($team, $filters, 3);
+        $renderSample = $samples[0] ?? $validated['sample'] ?? [];
 
         return response()->json([
             'count' => $count,
             'threshold' => $threshold,
             'windowMinutes' => $window,
             'willTrigger' => $count >= $threshold,
-            'samples' => $this->logs->export($team, $filters, 3),
+            'samples' => $samples,
+            'renderedMessage' => $this->dispatcher->renderAlertMessage(
+                $validated['message_template'] ?? '',
+                $validated['name'] ?? 'Preview alert',
+                $count,
+                $threshold,
+                $window,
+                $renderSample,
+            ),
         ]);
     }
 
