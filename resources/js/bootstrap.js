@@ -24,6 +24,7 @@ if (realtime.enabled && realtime.key) {
     window.Echo = new Echo({
         broadcaster: 'pusher',
         key: realtime.key,
+        cluster: realtime.cluster || 'mt1',
         wsHost: realtime.host || window.location.hostname,
         wsPort: port,
         wssPort: port,

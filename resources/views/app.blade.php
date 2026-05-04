@@ -19,6 +19,7 @@
                 'realtime' => [
                     'enabled' => config('broadcasting.default') === 'pusher' && filled($realtimeKey),
                     'key' => $realtimeKey,
+                    'cluster' => config('broadcasting.connections.pusher.options.cluster', env('PUSHER_APP_CLUSTER', 'mt1')),
                     'host' => config('fivebucket.realtime.client_host'),
                     'port' => config('fivebucket.realtime.client_port'),
                     'scheme' => config('fivebucket.realtime.client_scheme'),
