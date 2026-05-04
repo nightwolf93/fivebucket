@@ -172,10 +172,10 @@ class DatabaseLogStorage implements LogStorage
         }
 
         foreach ([
-            'requestId' => ['request_id', 'requestId'],
+            'requestId' => ['request_id', 'requestId', 'request.id', 'trace_id', 'traceId'],
             'server' => ['server_id', 'server', 'source'],
-            'player' => ['player_id', 'player', 'playerSource'],
-            'ip' => ['ip'],
+            'player' => ['player_id', 'player', 'playerSource', 'player.source', 'player.id', 'charId', 'charName'],
+            'ip' => ['ip', 'player.ip'],
         ] as $filter => $keys) {
             $value = trim((string) ($filters[$filter] ?? ''));
 
@@ -184,18 +184,21 @@ class DatabaseLogStorage implements LogStorage
             }
 
             $query->where(function (Builder $query) use ($keys, $value): void {
-                foreach ($keys as $key) {
-                    $query->orWhere('metadata', 'like', $this->metadataLike($key, $value));
+                foreach ($keys as $index => $key) {
+                    $this->whereJsonText($query, $key, $value, 'contains', $index === 0 ? 'and' : 'or');
                 }
             });
         }
 
         $metadataKey = $this->metadataKey($filters['metadataKey'] ?? '');
         $metadataValue = trim((string) ($filters['metadataValue'] ?? ''));
-        if ($metadataKey !== null && $metadataValue !== '') {
-            $query->where('metadata', 'like', $this->metadataLike($metadataKey, $metadataValue));
-        } elseif ($metadataKey !== null) {
-            $query->where('metadata', 'like', '%"'.$metadataKey.'"%');
+        if ($metadataKey !== null) {
+            $this->whereJsonText(
+                $query,
+                $metadataKey,
+                $metadataValue,
+                $this->metadataMode($filters['metadataMode'] ?? 'contains', $metadataValue === ''),
+            );
         }
 
         if (($durationMin = $this->number($filters['durationMin'] ?? null)) !== null) {
@@ -334,11 +337,34 @@ class DatabaseLogStorage implements LogStorage
     {
         $key = trim((string) $value);
 
-        if ($key === '' || ! preg_match('/^[A-Za-z0-9_.-]{1,80}$/', $key)) {
+        if ($key === '' || strlen($key) > 160 || ! preg_match('/^[A-Za-z0-9_.-]+$/', $key)) {
             return null;
         }
 
-        return $key;
+        $segments = explode('.', $key);
+
+        foreach ($segments as $segment) {
+            if ($segment === '' || strlen($segment) > 80 || ! preg_match('/^[A-Za-z0-9_-]+$/', $segment)) {
+                return null;
+            }
+        }
+
+        return implode('.', $segments);
+    }
+
+    private function metadataMode(mixed $value, bool $emptyValue = false): string
+    {
+        $mode = strtolower(trim((string) $value));
+
+        if (in_array($mode, ['exists', 'missing'], true)) {
+            return $mode;
+        }
+
+        if ($emptyValue) {
+            return 'exists';
+        }
+
+        return in_array($mode, ['contains', 'exact'], true) ? $mode : 'contains';
     }
 
     private function metadataLike(string $key, string $value): string
@@ -353,6 +379,85 @@ class DatabaseLogStorage implements LogStorage
         }
 
         return is_numeric($value) ? (float) $value : null;
+    }
+
+    private function whereJsonText(Builder|HasMany $query, string $key, string $value, string $mode = 'contains', string $boolean = 'and'): void
+    {
+        $driver = DB::connection()->getDriverName();
+        $method = $boolean === 'or' ? 'orWhereRaw' : 'whereRaw';
+        $jsonPath = $this->jsonPath($key);
+
+        if ($driver === 'sqlite') {
+            if ($mode === 'missing') {
+                $query->{$method}('json_type(metadata, ?) IS NULL', [$jsonPath]);
+
+                return;
+            }
+
+            if ($mode === 'exists' || $value === '') {
+                $query->{$method}('json_type(metadata, ?) IS NOT NULL', [$jsonPath]);
+
+                return;
+            }
+
+            $operator = $mode === 'exact' ? '=' : 'LIKE';
+            $needle = $mode === 'exact' ? $value : "%{$value}%";
+            $query->{$method}("CAST(json_extract(metadata, ?) AS TEXT) {$operator} ?", [$jsonPath, $needle]);
+
+            return;
+        }
+
+        if ($driver === 'mysql') {
+            if ($mode === 'missing') {
+                $query->{$method}("JSON_CONTAINS_PATH(metadata, 'one', ?) = 0", [$jsonPath]);
+
+                return;
+            }
+
+            if ($mode === 'exists' || $value === '') {
+                $query->{$method}("JSON_CONTAINS_PATH(metadata, 'one', ?) = 1", [$jsonPath]);
+
+                return;
+            }
+
+            $operator = $mode === 'exact' ? '=' : 'LIKE';
+            $needle = $mode === 'exact' ? $value : "%{$value}%";
+            $query->{$method}("JSON_UNQUOTE(JSON_EXTRACT(metadata, ?)) {$operator} ?", [$jsonPath, $needle]);
+
+            return;
+        }
+
+        $method = $boolean === 'or' ? 'orWhere' : 'where';
+
+        if ($mode === 'missing') {
+            $query->{$method}('metadata', 'not like', '%"'.$this->lastMetadataSegment($key).'"%');
+
+            return;
+        }
+
+        if ($mode === 'exists' || $value === '') {
+            $query->{$method}('metadata', 'like', '%"'.$this->lastMetadataSegment($key).'"%');
+
+            return;
+        }
+
+        $query->{$method}('metadata', 'like', $this->metadataLike($this->lastMetadataSegment($key), $value));
+    }
+
+    private function jsonPath(string $key): string
+    {
+        $path = '$';
+
+        foreach (explode('.', $key) as $segment) {
+            $path .= ctype_digit($segment) ? '['.$segment.']' : '."'.str_replace('"', '\"', $segment).'"';
+        }
+
+        return $path;
+    }
+
+    private function lastMetadataSegment(string $key): string
+    {
+        return collect(explode('.', $key))->last() ?: $key;
     }
 
     private function whereJsonNumber(Builder|HasMany $query, string $key, string $operator, float $value): void

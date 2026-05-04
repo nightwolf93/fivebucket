@@ -211,6 +211,13 @@ class FivemanageCompatibilityTest extends TestCase
                     'request_id' => 'req_trace_1',
                     'server_id' => 'prod-rp-1',
                     'playerSource' => 42,
+                    'charId' => 1,
+                    'action' => 'rope_completed',
+                    'atmCoords' => [
+                        'x' => 285.35,
+                        'y' => 142.97,
+                        'z' => 103.16,
+                    ],
                     'duration_ms' => 380,
                 ],
             ],
@@ -226,6 +233,24 @@ class FivemanageCompatibilityTest extends TestCase
 
         $this->actingAs($user)
             ->get('/logs?levels=error,warn&requestId=req_trace_1&server=prod-rp-1&player=42&durationMin=200&metadataKey=duration_ms&metadataValue=380&sort=oldest&perPage=50')
+            ->assertOk()
+            ->assertSee('Trace failure on inventory sync')
+            ->assertDontSee('Unrelated heartbeat');
+
+        $this->actingAs($user)
+            ->get('/logs?metadataKey=charId&metadataValue=1&metadataMode=exact')
+            ->assertOk()
+            ->assertSee('Trace failure on inventory sync')
+            ->assertDontSee('Unrelated heartbeat');
+
+        $this->actingAs($user)
+            ->get('/logs?metadataKey=atmCoords.x&metadataValue=285.35&metadataMode=exact')
+            ->assertOk()
+            ->assertSee('Trace failure on inventory sync')
+            ->assertDontSee('Unrelated heartbeat');
+
+        $this->actingAs($user)
+            ->get('/logs?metadataKey=atmCoords.z&metadataMode=exists')
             ->assertOk()
             ->assertSee('Trace failure on inventory sync')
             ->assertDontSee('Unrelated heartbeat');

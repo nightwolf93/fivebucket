@@ -245,10 +245,10 @@ class ClickHouseLogStorage implements LogStorage
         }
 
         foreach ([
-            'requestId' => ['request_id', 'requestId'],
+            'requestId' => ['request_id', 'requestId', 'request.id', 'trace_id', 'traceId'],
             'server' => ['server_id', 'server', 'source'],
-            'player' => ['player_id', 'player', 'playerSource'],
-            'ip' => ['ip'],
+            'player' => ['player_id', 'player', 'playerSource', 'player.source', 'player.id', 'charId', 'charName'],
+            'ip' => ['ip', 'player.ip'],
         ] as $filter => $keys) {
             $value = trim((string) ($filters[$filter] ?? ''));
 
@@ -256,21 +256,20 @@ class ClickHouseLogStorage implements LogStorage
                 continue;
             }
 
-            $needle = $this->quote($value);
             $where[] = '('.implode(' OR ', array_map(
-                fn ($key) => '(positionCaseInsensitiveUTF8(JSONExtractString(metadata, '.$this->quote($key)."), {$needle}) > 0 OR positionCaseInsensitiveUTF8(JSONExtractRaw(metadata, ".$this->quote($key)."), {$needle}) > 0)",
+                fn ($key) => $this->metadataCondition($key, $value, 'contains'),
                 $keys,
             )).')';
         }
 
         $metadataKey = $this->metadataKey($filters['metadataKey'] ?? '');
         $metadataValue = trim((string) ($filters['metadataValue'] ?? ''));
-        if ($metadataKey !== null && $metadataValue !== '') {
-            $key = $this->quote($metadataKey);
-            $value = $this->quote($metadataValue);
-            $where[] = "(positionCaseInsensitiveUTF8(JSONExtractString(metadata, {$key}), {$value}) > 0 OR positionCaseInsensitiveUTF8(JSONExtractRaw(metadata, {$key}), {$value}) > 0)";
-        } elseif ($metadataKey !== null) {
-            $where[] = 'JSONHas(metadata, '.$this->quote($metadataKey).')';
+        if ($metadataKey !== null) {
+            $where[] = $this->metadataCondition(
+                $metadataKey,
+                $metadataValue !== '' ? $metadataValue : null,
+                $this->metadataMode($filters['metadataMode'] ?? 'contains', $metadataValue === ''),
+            );
         }
 
         if (($durationMin = $this->number($filters['durationMin'] ?? null)) !== null) {
@@ -354,11 +353,68 @@ class ClickHouseLogStorage implements LogStorage
     {
         $key = trim((string) $value);
 
-        if ($key === '' || ! preg_match('/^[A-Za-z0-9_.-]{1,80}$/', $key)) {
+        if ($key === '' || strlen($key) > 160 || ! preg_match('/^[A-Za-z0-9_.-]+$/', $key)) {
             return null;
         }
 
-        return $key;
+        $segments = explode('.', $key);
+
+        foreach ($segments as $segment) {
+            if ($segment === '' || strlen($segment) > 80 || ! preg_match('/^[A-Za-z0-9_-]+$/', $segment)) {
+                return null;
+            }
+        }
+
+        return implode('.', $segments);
+    }
+
+    private function metadataMode(mixed $value, bool $emptyValue = false): string
+    {
+        $mode = strtolower(trim((string) $value));
+
+        if (in_array($mode, ['exists', 'missing'], true)) {
+            return $mode;
+        }
+
+        if ($emptyValue) {
+            return 'exists';
+        }
+
+        return in_array($mode, ['contains', 'exact'], true) ? $mode : 'contains';
+    }
+
+    private function metadataCondition(string $key, ?string $value = null, string $mode = 'contains'): string
+    {
+        $path = $this->quote($this->jsonPath($key));
+
+        if ($mode === 'missing') {
+            return "NOT JSON_EXISTS(metadata, {$path})";
+        }
+
+        if ($mode === 'exists' || $value === null || $value === '') {
+            return "JSON_EXISTS(metadata, {$path})";
+        }
+
+        $needle = $this->quote($value);
+        $scalar = "JSON_VALUE(metadata, {$path})";
+        $raw = "JSON_QUERY(metadata, {$path})";
+
+        if ($mode === 'exact') {
+            return "{$scalar} = {$needle}";
+        }
+
+        return "(positionCaseInsensitiveUTF8({$scalar}, {$needle}) > 0 OR positionCaseInsensitiveUTF8({$raw}, {$needle}) > 0)";
+    }
+
+    private function jsonPath(string $key): string
+    {
+        $path = '$';
+
+        foreach (explode('.', $key) as $segment) {
+            $path .= ctype_digit($segment) ? '['.$segment.']' : '."'.str_replace('"', '\"', $segment).'"';
+        }
+
+        return $path;
     }
 
     private function number(mixed $value): ?float
@@ -372,7 +428,12 @@ class ClickHouseLogStorage implements LogStorage
 
     private function durationExpression(): string
     {
-        return "greatest(JSONExtractFloat(metadata, 'duration_ms'), JSONExtractFloat(metadata, 'duration'), ifNull(toFloat64OrNull(JSONExtractString(metadata, 'duration_ms')), 0), ifNull(toFloat64OrNull(JSONExtractString(metadata, 'duration')), 0))";
+        return "greatest(
+            ifNull(toFloat64OrNull(JSON_VALUE(metadata, '$.\"duration_ms\"')), 0),
+            ifNull(toFloat64OrNull(JSON_VALUE(metadata, '$.\"duration\"')), 0),
+            ifNull(toFloat64OrNull(JSON_VALUE(metadata, '$.\"timing\".\"duration_ms\"')), 0),
+            ifNull(toFloat64OrNull(JSON_VALUE(metadata, '$.\"timing\".\"duration\"')), 0)
+        )";
     }
 
     private function perPage(mixed $value): int

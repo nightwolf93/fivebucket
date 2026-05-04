@@ -164,6 +164,20 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
         navigate({ ...draft, q: log.id || log.message || '', qMode: 'all' });
     };
 
+    const applyMetadataFilter = (path, value = undefined) => {
+        const hasValue = value !== undefined && (value === null || typeof value !== 'object');
+
+        setAdvancedOpen(true);
+        navigate({
+            ...draft,
+            q: '',
+            qMode: 'all',
+            metadataKey: path,
+            metadataValue: hasValue ? String(value) : '',
+            metadataMode: hasValue ? 'exact' : 'exists',
+        });
+    };
+
     const activeFilterCount = countActiveFilters(draft);
 
     return (
@@ -285,6 +299,24 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
                         >
                             <Plus className="h-3 w-3" />
                             resource
+                        </button>
+                    )}
+
+                    {draft.metadataKey && (
+                        <button
+                            type="button"
+                            className="fb-chip active"
+                            onClick={() => navigate({ ...draft, metadataKey: '', metadataValue: '', metadataMode: 'contains' })}
+                            title="Clear metadata filter"
+                        >
+                            <Filter className="h-3 w-3" />
+                            meta.{draft.metadataKey}
+                            {draft.metadataMode === 'missing'
+                                ? ' missing'
+                                : draft.metadataMode === 'exists' || !draft.metadataValue
+                                    ? ' exists'
+                                    : ` = ${draft.metadataValue}`}
+                            <X className="h-3 w-3" />
                         </button>
                     )}
 
@@ -421,6 +453,7 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
                             log={selectedLog}
                             onClose={() => setSelectedId(null)}
                             onFilterResource={(resource) => setResourceFilter(resource)}
+                            onApplyMetadataFilter={applyMetadataFilter}
                             onTrace={traceLog}
                         />
                     )}
@@ -506,12 +539,22 @@ function AdvancedFilters({ draft, resources, onChange, onExport, onClear }) {
 
                 <label className="fb-advanced-field">
                     Metadata key
-                    <input value={draft.metadataKey} placeholder="job, action, vehicle" onChange={(event) => onChange('metadataKey', event.target.value)} />
+                    <input value={draft.metadataKey} placeholder="charId, action, atmCoords.x" onChange={(event) => onChange('metadataKey', event.target.value)} />
                 </label>
 
                 <label className="fb-advanced-field">
                     Metadata value
-                    <input value={draft.metadataValue} placeholder="police, spawn, sultan" onChange={(event) => onChange('metadataValue', event.target.value)} />
+                    <input value={draft.metadataValue} placeholder="1, rope_completed, 285.34" onChange={(event) => onChange('metadataValue', event.target.value)} />
+                </label>
+
+                <label className="fb-advanced-field">
+                    Metadata mode
+                    <select value={draft.metadataMode} onChange={(event) => onChange('metadataMode', event.target.value)}>
+                        <option value="contains">Contains</option>
+                        <option value="exact">Exact match</option>
+                        <option value="exists">Key exists</option>
+                        <option value="missing">Key missing</option>
+                    </select>
                 </label>
 
                 <label className="fb-advanced-field">
@@ -661,9 +704,17 @@ function LogLine({ log, selected, fresh, onSelect }) {
     );
 }
 
-function LogDetail({ log, onClose, onFilterResource, onTrace }) {
+function LogDetail({ log, onClose, onFilterResource, onApplyMetadataFilter, onTrace }) {
     const metadata = log.metadata || {};
     const context = detailContext(log);
+    const payload = {
+        id: log.id,
+        level: safeLevel(log.level),
+        timestamp: log.occurredAtIso,
+        resource: log.resource,
+        message: log.message,
+        metadata,
+    };
 
     return (
         <aside className="fb-log-detail">
@@ -691,19 +742,7 @@ function LogDetail({ log, onClose, onFilterResource, onTrace }) {
 
                 <section className="fb-log-detail-section">
                     <h2>Raw payload</h2>
-                    <pre
-                        className="fb-json-block"
-                        dangerouslySetInnerHTML={{
-                            __html: jsonHighlight({
-                                id: log.id,
-                                level: safeLevel(log.level),
-                                timestamp: log.occurredAtIso,
-                                resource: log.resource,
-                                message: log.message,
-                                metadata,
-                            }),
-                        }}
-                    />
+                    <InteractiveJson data={payload} onFilter={onApplyMetadataFilter} />
                 </section>
 
                 <section className="fb-log-detail-section">
@@ -730,6 +769,119 @@ function LogDetail({ log, onClose, onFilterResource, onTrace }) {
     );
 }
 
+function InteractiveJson({ data, onFilter }) {
+    const entries = Object.entries(data || {});
+
+    return (
+        <div className="fb-json-block" role="tree">
+            <div className="fb-json-line">
+                <span className="fb-json-brace">{'{'}</span>
+            </div>
+            {entries.map(([key, value], index) => (
+                <JsonNode
+                    key={key}
+                    name={key}
+                    value={value}
+                    path={key}
+                    depth={1}
+                    comma={index < entries.length - 1}
+                    onFilter={onFilter}
+                />
+            ))}
+            <div className="fb-json-line">
+                <span className="fb-json-brace">{'}'}</span>
+            </div>
+        </div>
+    );
+}
+
+function JsonNode({ name, value, path, depth, comma, onFilter }) {
+    const container = isJsonContainer(value);
+    const entries = container ? Object.entries(value || {}) : [];
+    const filterPath = metadataFilterPath(path);
+    const primitive = !container;
+    const canFilter = Boolean(filterPath);
+    const applyFilter = () => {
+        if (canFilter) {
+            onFilter(filterPath, primitive ? value : undefined);
+        }
+    };
+
+    if (container) {
+        const open = Array.isArray(value) ? '[' : '{';
+        const close = Array.isArray(value) ? ']' : '}';
+
+        return (
+            <>
+                <div className="fb-json-line" style={{ '--json-depth': depth }}>
+                    <button
+                        type="button"
+                        className={`fb-json-key ${canFilter ? 'clickable' : ''}`}
+                        onClick={applyFilter}
+                        disabled={!canFilter}
+                        title={canFilter ? `Filter ${filterPath} exists` : undefined}
+                    >
+                        "{name}"
+                    </button>
+                    <span className="fb-json-punct">:</span>
+                    <span className="fb-json-brace">{open}</span>
+                    <span className="fb-json-count">{entries.length}</span>
+                    {canFilter && (
+                        <button type="button" className="fb-json-filter" onClick={applyFilter} title={`Filter ${filterPath} exists`}>
+                            <Filter className="h-3 w-3" />
+                        </button>
+                    )}
+                </div>
+                {entries.map(([childKey, childValue], index) => (
+                    <JsonNode
+                        key={`${path}.${childKey}`}
+                        name={childKey}
+                        value={childValue}
+                        path={`${path}.${childKey}`}
+                        depth={depth + 1}
+                        comma={index < entries.length - 1}
+                        onFilter={onFilter}
+                    />
+                ))}
+                <div className="fb-json-line" style={{ '--json-depth': depth }}>
+                    <span className="fb-json-brace">{close}</span>
+                    {comma && <span className="fb-json-punct">,</span>}
+                </div>
+            </>
+        );
+    }
+
+    return (
+        <div className="fb-json-line" style={{ '--json-depth': depth }}>
+            <button
+                type="button"
+                className={`fb-json-key ${canFilter ? 'clickable' : ''}`}
+                onClick={applyFilter}
+                disabled={!canFilter}
+                title={canFilter ? `Filter ${filterPath} = ${String(value)}` : undefined}
+            >
+                "{name}"
+            </button>
+            <span className="fb-json-punct">:</span>
+            <button
+                type="button"
+                className={`fb-json-value ${jsonValueClass(value)} ${canFilter ? 'clickable' : ''}`}
+                onClick={applyFilter}
+                disabled={!canFilter}
+                title={canFilter ? `Filter ${filterPath} = ${String(value)}` : undefined}
+            >
+                {jsonValuePreview(value)}
+            </button>
+            {canFilter && (
+                <button type="button" className="fb-json-filter" onClick={applyFilter} title={`Filter ${filterPath} = ${String(value)}`}>
+                    <Filter className="h-3 w-3" />
+                </button>
+            )}
+            {comma && <span className="fb-json-punct">,</span>}
+        </div>
+    );
+}
+
 function LevelPill({ level }) {
     const normalized = safeLevel(level);
 
@@ -752,6 +904,7 @@ function normalizeFilters(value = {}) {
         ip: value.ip || '',
         metadataKey: value.metadataKey || '',
         metadataValue: value.metadataValue || '',
+        metadataMode: ['contains', 'exact', 'exists', 'missing'].includes(value.metadataMode) ? value.metadataMode : 'contains',
         durationMin: value.durationMin || '',
         durationMax: value.durationMax || '',
         from: value.from || '',
@@ -776,6 +929,7 @@ function defaultFilters() {
         ip: '',
         metadataKey: '',
         metadataValue: '',
+        metadataMode: 'contains',
         durationMin: '',
         durationMax: '',
         from: '',
@@ -813,6 +967,7 @@ function serializeFilters(value) {
         ip: filters.ip || undefined,
         metadataKey: filters.metadataKey || undefined,
         metadataValue: filters.metadataValue || undefined,
+        metadataMode: filters.metadataKey && filters.metadataMode !== 'contains' ? filters.metadataMode : undefined,
         durationMin: filters.durationMin || undefined,
         durationMax: filters.durationMax || undefined,
         from: filters.from || undefined,
@@ -857,6 +1012,7 @@ function countActiveFilters(value) {
     if (!levels.includes('all')) count++;
     if (filters.qMode !== 'all') count++;
     if (filters.resource && filters.resourceMode !== 'exact') count++;
+    if (filters.metadataKey && filters.metadataMode !== 'contains') count++;
     if (filters.sort !== 'newest') count++;
     if (Number(filters.perPage) !== 25) count++;
 
@@ -975,15 +1131,26 @@ function matchesFilters(log, filters) {
         }
     }
 
-    if (normalized.requestId && !metadataValueIncludes(metadata, ['request_id', 'requestId'], normalized.requestId)) return false;
+    if (normalized.requestId && !metadataValueIncludes(metadata, ['request_id', 'requestId', 'request.id', 'trace_id', 'traceId'], normalized.requestId)) return false;
     if (normalized.server && !metadataValueIncludes(metadata, ['server_id', 'server', 'source'], normalized.server)) return false;
-    if (normalized.player && !metadataValueIncludes(metadata, ['player_id', 'player', 'playerSource'], normalized.player)) return false;
-    if (normalized.ip && !metadataValueIncludes(metadata, ['ip'], normalized.ip)) return false;
+    if (normalized.player && !metadataValueIncludes(metadata, ['player_id', 'player', 'playerSource', 'player.source', 'player.id', 'charId', 'charName'], normalized.player)) return false;
+    if (normalized.ip && !metadataValueIncludes(metadata, ['ip', 'player.ip'], normalized.ip)) return false;
 
     if (normalized.metadataKey) {
         const value = metadataPath(metadata, normalized.metadataKey);
-        if (value === undefined) return false;
-        if (normalized.metadataValue && !String(value).toLowerCase().includes(normalized.metadataValue.toLowerCase())) return false;
+        const exists = value !== undefined;
+
+        if (normalized.metadataMode === 'missing') {
+            if (exists) return false;
+        } else if (!exists) {
+            return false;
+        } else if (normalized.metadataMode === 'exists' || !normalized.metadataValue) {
+            // The existence check passed; keep evaluating the remaining filters.
+        } else if (normalized.metadataMode === 'exact') {
+            if (String(value) !== String(normalized.metadataValue)) return false;
+        } else if (!String(value).toLowerCase().includes(normalized.metadataValue.toLowerCase())) {
+            return false;
+        }
     }
 
     const duration = Number(metadata.duration_ms ?? metadata.duration ?? 0);
@@ -1029,6 +1196,37 @@ function metadataPath(metadata, path) {
         .split('.')
         .filter(Boolean)
         .reduce((value, key) => (value && typeof value === 'object' ? value[key] : undefined), metadata);
+}
+
+function metadataFilterPath(path) {
+    if (path === 'metadata' || !path.startsWith('metadata.')) {
+        return null;
+    }
+
+    return path.slice('metadata.'.length);
+}
+
+function isJsonContainer(value) {
+    return value !== null && typeof value === 'object';
+}
+
+function jsonValueClass(value) {
+    if (typeof value === 'string') return 's';
+    if (typeof value === 'number') return 'n';
+
+    return 'b';
+}
+
+function jsonValuePreview(value) {
+    if (typeof value === 'string') {
+        return `"${value}"`;
+    }
+
+    if (value === null) {
+        return 'null';
+    }
+
+    return String(value);
 }
 
 function timeframeStartDate(value) {

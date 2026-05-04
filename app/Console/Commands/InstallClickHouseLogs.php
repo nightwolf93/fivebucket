@@ -19,19 +19,28 @@ class InstallClickHouseLogs extends Command
             return self::SUCCESS;
         }
 
-        $sql = $this->schemaSql();
-        $request = Http::timeout((int) config('fivebucket.logs.clickhouse.timeout', 10))
-            ->withBody($sql, 'text/plain');
+        foreach ($this->statements() as $sql) {
+            $request = Http::timeout((int) config('fivebucket.logs.clickhouse.timeout', 10))
+                ->withBody($sql, 'text/plain');
 
-        if ($username = config('fivebucket.logs.clickhouse.username')) {
-            $request = $request->withBasicAuth($username, (string) config('fivebucket.logs.clickhouse.password'));
+            if ($username = config('fivebucket.logs.clickhouse.username')) {
+                $request = $request->withBasicAuth($username, (string) config('fivebucket.logs.clickhouse.password'));
+            }
+
+            $request->post(rtrim((string) config('fivebucket.logs.clickhouse.url'), '/'))->throw();
         }
-
-        $request->post(rtrim((string) config('fivebucket.logs.clickhouse.url'), '/'))->throw();
 
         $this->info('ClickHouse log table is ready: '.$this->clickHouseTable());
 
         return self::SUCCESS;
+    }
+
+    private function statements(): array
+    {
+        return [
+            $this->schemaSql(),
+            ...$this->indexSql(),
+        ];
     }
 
     private function schemaSql(): string
@@ -55,6 +64,22 @@ ENGINE = MergeTree
 PARTITION BY toYYYYMM(created_at)
 ORDER BY (team_id, occurred_at, level, resource){$ttl}
 SQL;
+    }
+
+    private function indexSql(): array
+    {
+        $table = $this->clickHouseTable();
+
+        return [
+            "ALTER TABLE {$table} ADD INDEX IF NOT EXISTS idx_fb_metadata_token metadata TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 4",
+            "ALTER TABLE {$table} ADD INDEX IF NOT EXISTS idx_fb_message_token message TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 4",
+            "ALTER TABLE {$table} ADD INDEX IF NOT EXISTS idx_fb_request_id JSON_VALUE(metadata, '$.\"request_id\"') TYPE bloom_filter(0.01) GRANULARITY 4",
+            "ALTER TABLE {$table} ADD INDEX IF NOT EXISTS idx_fb_request_id_alt JSON_VALUE(metadata, '$.\"requestId\"') TYPE bloom_filter(0.01) GRANULARITY 4",
+            "ALTER TABLE {$table} ADD INDEX IF NOT EXISTS idx_fb_action JSON_VALUE(metadata, '$.\"action\"') TYPE bloom_filter(0.01) GRANULARITY 4",
+            "ALTER TABLE {$table} ADD INDEX IF NOT EXISTS idx_fb_dataset JSON_VALUE(metadata, '$.\"dataset\"') TYPE bloom_filter(0.01) GRANULARITY 4",
+            "ALTER TABLE {$table} ADD INDEX IF NOT EXISTS idx_fb_source JSON_VALUE(metadata, '$.\"source\"') TYPE bloom_filter(0.01) GRANULARITY 4",
+            "ALTER TABLE {$table} ADD INDEX IF NOT EXISTS idx_fb_char_id JSON_VALUE(metadata, '$.\"charId\"') TYPE bloom_filter(0.01) GRANULARITY 4",
+        ];
     }
 
     private function clickHouseTable(): string

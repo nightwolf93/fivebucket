@@ -34,6 +34,7 @@ class LogDashboardController extends Controller
             'ip' => trim((string) $request->query('ip', '')),
             'metadataKey' => trim((string) $request->query('metadataKey', '')),
             'metadataValue' => trim((string) $request->query('metadataValue', '')),
+            'metadataMode' => $this->metadataMode($request->query('metadataMode', 'contains')),
             'durationMin' => trim((string) $request->query('durationMin', '')),
             'durationMax' => trim((string) $request->query('durationMax', '')),
             'from' => trim((string) $request->query('from', '')),
@@ -85,6 +86,7 @@ class LogDashboardController extends Controller
             'ip' => trim((string) $request->query('ip', '')),
             'metadataKey' => trim((string) $request->query('metadataKey', '')),
             'metadataValue' => trim((string) $request->query('metadataValue', '')),
+            'metadataMode' => $this->metadataMode($request->query('metadataMode', 'contains')),
             'durationMin' => trim((string) $request->query('durationMin', '')),
             'durationMax' => trim((string) $request->query('durationMax', '')),
             'from' => trim((string) $request->query('from', '')),
@@ -138,5 +140,12 @@ class LogDashboardController extends Controller
             ->all();
 
         return $levels === [] ? ['all'] : $levels;
+    }
+
+    private function metadataMode(mixed $value): string
+    {
+        $mode = strtolower(trim((string) $value));
+
+        return in_array($mode, ['contains', 'exact', 'exists', 'missing'], true) ? $mode : 'contains';
     }
 }

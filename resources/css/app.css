@@ -2134,6 +2134,98 @@
         line-height: 1.55;
     }
 
+    .fb-json-line {
+        display: flex;
+        min-width: 0;
+        align-items: flex-start;
+        flex-wrap: wrap;
+        gap: 5px;
+        padding-left: calc(var(--json-depth, 0) * 12px);
+    }
+
+    .fb-json-key,
+    .fb-json-value,
+    .fb-json-filter {
+        border: 0;
+        background: transparent;
+        padding: 0;
+        font: inherit;
+    }
+
+    .fb-json-key,
+    .fb-json-value {
+        max-width: 100%;
+        color: var(--fg);
+        text-align: left;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+    }
+
+    .fb-json-key {
+        color: oklch(0.7 0.13 220);
+    }
+
+    .fb-json-key.clickable,
+    .fb-json-value.clickable {
+        cursor: pointer;
+    }
+
+    .fb-json-key.clickable:hover,
+    .fb-json-value.clickable:hover {
+        color: var(--accent-strong);
+        text-decoration: underline;
+        text-decoration-thickness: 1px;
+        text-underline-offset: 2px;
+    }
+
+    .fb-json-key:disabled,
+    .fb-json-value:disabled {
+        cursor: default;
+    }
+
+    .fb-json-value.s {
+        color: var(--accent-strong);
+    }
+
+    .fb-json-value.n {
+        color: var(--lvl-warn);
+    }
+
+    .fb-json-value.b {
+        color: var(--lvl-error);
+    }
+
+    .fb-json-punct,
+    .fb-json-brace,
+    .fb-json-count {
+        color: var(--fg-dim);
+    }
+
+    .fb-json-count {
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 0 5px;
+        font-size: 10px;
+    }
+
+    .fb-json-filter {
+        display: inline-flex;
+        width: 18px;
+        height: 18px;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        color: var(--fg-muted);
+        cursor: pointer;
+    }
+
+    .fb-json-filter:hover {
+        border-color: var(--accent-border);
+        background: var(--accent-bg);
+        color: var(--accent-strong);
+    }
+
     .fb-json-block .k {
         color: oklch(0.7 0.13 220);
     }
