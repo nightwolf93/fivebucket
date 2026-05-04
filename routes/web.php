@@ -40,6 +40,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/media', [MediaController::class, 'store'])->name('media.store');
     Route::delete('/media/{mediaFile}', [MediaController::class, 'destroy'])->name('media.destroy');
     Route::get('/logs', [LogDashboardController::class, 'index'])->name('logs.index');
+    Route::get('/logs/export', [LogDashboardController::class, 'export'])->name('logs.export');
     Route::get('/settings', [TeamSettingsController::class, 'edit'])->name('settings.index');
     Route::patch('/settings', [TeamSettingsController::class, 'update'])->name('settings.update');
     Route::post('/billing/checkout', [BillingController::class, 'checkout'])->name('billing.checkout');

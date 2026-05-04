@@ -56,12 +56,26 @@ class DatabaseLogStorage implements LogStorage
 
         $perPage = $this->perPage($filters['perPage'] ?? null);
 
+        $this->applySorting($query, $filters);
+
         return $query
-            ->orderByDesc('occurred_at')
-            ->orderByDesc('id')
             ->paginate($perPage)
             ->withQueryString()
             ->through(fn (LogEntry $log) => $this->formatDatabaseRow($log));
+    }
+
+    public function export(Team $team, array $filters = [], int $limit = 5000): array
+    {
+        $query = $team->logEntries();
+
+        $this->applyFilters($query, $filters);
+        $this->applySorting($query, $filters);
+
+        return $query
+            ->limit(max(1, min(10000, $limit)))
+            ->get()
+            ->map(fn (LogEntry $log) => $this->formatDatabaseRow($log))
+            ->all();
     }
 
     public function summary(Team $team): array
@@ -116,30 +130,99 @@ class DatabaseLogStorage implements LogStorage
         $q = trim((string) ($filters['q'] ?? ''));
 
         if ($q !== '') {
-            $query->where(function (Builder $query) use ($q) {
+            $mode = trim((string) ($filters['qMode'] ?? 'all'));
+
+            $query->where(function (Builder $query) use ($q, $mode) {
+                if ($mode === 'message') {
+                    $query->where('message', 'like', "%{$q}%");
+
+                    return;
+                }
+
+                if ($mode === 'metadata') {
+                    $query->where('metadata', 'like', "%{$q}%");
+
+                    return;
+                }
+
+                if ($mode === 'resource') {
+                    $query->where('resource', 'like', "%{$q}%");
+
+                    return;
+                }
+
                 $query->where('message', 'like', "%{$q}%")
                     ->orWhere('resource', 'like', "%{$q}%")
                     ->orWhere('metadata', 'like', "%{$q}%");
             });
         }
 
-        $level = trim((string) ($filters['level'] ?? ''));
-        if ($level !== '' && $level !== 'all') {
-            $query->where('level', $this->normalizeLevel($level));
+        $levels = $this->levels($filters);
+        if ($levels !== []) {
+            $query->whereIn('level', $levels);
         }
 
         $resource = trim((string) ($filters['resource'] ?? ''));
         if ($resource !== '') {
-            $query->where('resource', $resource);
+            if (($filters['resourceMode'] ?? 'exact') === 'contains') {
+                $query->where('resource', 'like', "%{$resource}%");
+            } else {
+                $query->where('resource', $resource);
+            }
         }
 
-        if ($from = $this->timestamp($filters['from'] ?? null)) {
+        foreach ([
+            'requestId' => ['request_id', 'requestId'],
+            'server' => ['server_id', 'server', 'source'],
+            'player' => ['player_id', 'player', 'playerSource'],
+            'ip' => ['ip'],
+        ] as $filter => $keys) {
+            $value = trim((string) ($filters[$filter] ?? ''));
+
+            if ($value === '') {
+                continue;
+            }
+
+            $query->where(function (Builder $query) use ($keys, $value): void {
+                foreach ($keys as $key) {
+                    $query->orWhere('metadata', 'like', $this->metadataLike($key, $value));
+                }
+            });
+        }
+
+        $metadataKey = $this->metadataKey($filters['metadataKey'] ?? '');
+        $metadataValue = trim((string) ($filters['metadataValue'] ?? ''));
+        if ($metadataKey !== null && $metadataValue !== '') {
+            $query->where('metadata', 'like', $this->metadataLike($metadataKey, $metadataValue));
+        } elseif ($metadataKey !== null) {
+            $query->where('metadata', 'like', '%"'.$metadataKey.'"%');
+        }
+
+        if (($durationMin = $this->number($filters['durationMin'] ?? null)) !== null) {
+            $this->whereJsonNumber($query, 'duration_ms', '>=', $durationMin);
+        }
+
+        if (($durationMax = $this->number($filters['durationMax'] ?? null)) !== null) {
+            $this->whereJsonNumber($query, 'duration_ms', '<=', $durationMax);
+        }
+
+        if ($from = $this->fromTimestamp($filters)) {
             $query->where('occurred_at', '>=', $from);
         }
 
         if ($to = $this->timestamp($filters['to'] ?? null)) {
             $query->where('occurred_at', '<=', $to);
         }
+    }
+
+    private function applySorting(Builder|HasMany $query, array $filters): void
+    {
+        match ((string) ($filters['sort'] ?? 'newest')) {
+            'oldest' => $query->orderBy('occurred_at')->orderBy('id'),
+            'level' => $query->orderBy('level')->orderByDesc('occurred_at')->orderByDesc('id'),
+            'resource' => $query->orderBy('resource')->orderByDesc('occurred_at')->orderByDesc('id'),
+            default => $query->orderByDesc('occurred_at')->orderByDesc('id'),
+        };
     }
 
     private function rateBuckets(Team $team): array
@@ -217,8 +300,82 @@ class DatabaseLogStorage implements LogStorage
         }
     }
 
+    private function fromTimestamp(array $filters): ?Carbon
+    {
+        if ($from = $this->timestamp($filters['from'] ?? null)) {
+            return $from;
+        }
+
+        return match ((string) ($filters['timeframe'] ?? '')) {
+            '15m' => now()->subMinutes(15),
+            '1h' => now()->subHour(),
+            '6h' => now()->subHours(6),
+            '24h' => now()->subDay(),
+            '7d' => now()->subDays(7),
+            '30d' => now()->subDays(30),
+            default => null,
+        };
+    }
+
+    private function levels(array $filters): array
+    {
+        $value = $filters['levels'] ?? $filters['level'] ?? '';
+        $levels = is_array($value) ? $value : preg_split('/[,|]/', (string) $value);
+
+        return collect($levels ?: [])
+            ->map(fn ($level) => $this->normalizeLevel((string) $level))
+            ->filter(fn ($level) => in_array($level, ['debug', 'info', 'warn', 'error', 'fatal'], true))
+            ->values()
+            ->unique()
+            ->all();
+    }
+
+    private function metadataKey(mixed $value): ?string
+    {
+        $key = trim((string) $value);
+
+        if ($key === '' || ! preg_match('/^[A-Za-z0-9_.-]{1,80}$/', $key)) {
+            return null;
+        }
+
+        return $key;
+    }
+
+    private function metadataLike(string $key, string $value): string
+    {
+        return '%"'.$key.'"%'.$value.'%';
+    }
+
+    private function number(mixed $value): ?float
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return is_numeric($value) ? (float) $value : null;
+    }
+
+    private function whereJsonNumber(Builder|HasMany $query, string $key, string $operator, float $value): void
+    {
+        $driver = DB::connection()->getDriverName();
+
+        if ($driver === 'sqlite') {
+            $query->whereRaw("CAST(json_extract(metadata, '$.\"{$key}\"') AS REAL) {$operator} ?", [$value]);
+
+            return;
+        }
+
+        if ($driver === 'mysql') {
+            $query->whereRaw("CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.\"{$key}\"')) AS DECIMAL(14,3)) {$operator} ?", [$value]);
+
+            return;
+        }
+
+        $query->where('metadata', 'like', '%"'.$key.'"%');
+    }
+
     private function perPage(mixed $value): int
     {
-        return max(10, min(100, (int) ($value ?: 25)));
+        return max(10, min(250, (int) ($value ?: 25)));
     }
 }

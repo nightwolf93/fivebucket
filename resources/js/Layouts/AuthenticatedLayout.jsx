@@ -1,6 +1,6 @@
 import ApplicationLogo from '@/Components/ApplicationLogo';
 import ThemeToggle from '@/Components/ThemeToggle';
-import { Link, usePage } from '@inertiajs/react';
+import { Link, router, usePage } from '@inertiajs/react';
 import {
     BookOpen,
     Boxes,
@@ -118,7 +118,17 @@ export default function Authenticated({ user, children }) {
 
                     <div className="fb-topbar-spacer" />
 
-                    <button type="button" className="fb-search">
+                    <button
+                        type="button"
+                        className="fb-search"
+                        onClick={() => {
+                            if (route().current('logs.*')) {
+                                document.querySelector('.fb-logs-search input')?.focus();
+                            } else {
+                                router.visit(route('logs.index'));
+                            }
+                        }}
+                    >
                         <Search className="h-3.5 w-3.5" />
                         <span>Search logs, assets, keys...</span>
                         <span className="fb-kbd">/</span>

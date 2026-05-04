@@ -54,17 +54,18 @@ class ClickHouseLogStorage implements LogStorage
 
     public function search(Team $team, array $filters = []): LengthAwarePaginator
     {
-        $perPage = max(10, min(100, (int) (($filters['perPage'] ?? null) ?: 25)));
+        $perPage = $this->perPage($filters['perPage'] ?? null);
         $page = max(1, (int) request()->query('page', 1));
         $offset = ($page - 1) * $perPage;
         $where = $this->whereClause($team, $filters);
+        $order = $this->orderClause($filters);
 
         $count = (int) (($this->query('SELECT count() AS aggregate FROM '.$this->table().' '.$where)['data'][0]['aggregate'] ?? 0));
 
         $result = $this->query(
             'SELECT id, level, message, nullIf(resource, \'\') AS resource, metadata, occurred_at, created_at '.
             'FROM '.$this->table().' '.$where.
-            ' ORDER BY occurred_at DESC, id DESC LIMIT '.$perPage.' OFFSET '.$offset
+            ' '.$order.' LIMIT '.$perPage.' OFFSET '.$offset
         );
 
         $items = collect($result['data'] ?? [])->map(fn (array $row) => $this->formatClickHouseRow($row));
@@ -73,6 +74,22 @@ class ClickHouseLogStorage implements LogStorage
             'path' => request()->url(),
             'query' => request()->query(),
         ]);
+    }
+
+    public function export(Team $team, array $filters = [], int $limit = 5000): array
+    {
+        $limit = max(1, min(10000, $limit));
+        $where = $this->whereClause($team, $filters);
+        $order = $this->orderClause($filters);
+
+        $result = $this->query(
+            'SELECT id, level, message, nullIf(resource, \'\') AS resource, metadata, occurred_at, created_at '.
+            'FROM '.$this->table().' '.$where.' '.$order.' LIMIT '.$limit
+        );
+
+        return collect($result['data'] ?? [])
+            ->map(fn (array $row) => $this->formatClickHouseRow($row))
+            ->all();
     }
 
     public function summary(Team $team): array
@@ -203,20 +220,68 @@ class ClickHouseLogStorage implements LogStorage
         $q = trim((string) ($filters['q'] ?? ''));
         if ($q !== '') {
             $needle = $this->quote($q);
-            $where[] = "(positionCaseInsensitiveUTF8(message, {$needle}) > 0 OR positionCaseInsensitiveUTF8(resource, {$needle}) > 0 OR positionCaseInsensitiveUTF8(metadata, {$needle}) > 0)";
+            $mode = trim((string) ($filters['qMode'] ?? 'all'));
+
+            $where[] = match ($mode) {
+                'message' => "positionCaseInsensitiveUTF8(message, {$needle}) > 0",
+                'resource' => "positionCaseInsensitiveUTF8(resource, {$needle}) > 0",
+                'metadata' => "positionCaseInsensitiveUTF8(metadata, {$needle}) > 0",
+                default => "(positionCaseInsensitiveUTF8(message, {$needle}) > 0 OR positionCaseInsensitiveUTF8(resource, {$needle}) > 0 OR positionCaseInsensitiveUTF8(metadata, {$needle}) > 0)",
+            };
         }
 
-        $level = trim((string) ($filters['level'] ?? ''));
-        if ($level !== '' && $level !== 'all') {
-            $where[] = 'level = '.$this->quote($this->normalizeLevel($level));
+        $levels = $this->levels($filters);
+        if ($levels !== []) {
+            $where[] = 'level IN ('.implode(', ', array_map(fn ($level) => $this->quote($level), $levels)).')';
         }
 
         $resource = trim((string) ($filters['resource'] ?? ''));
         if ($resource !== '') {
-            $where[] = 'resource = '.$this->quote($resource);
+            if (($filters['resourceMode'] ?? 'exact') === 'contains') {
+                $where[] = 'positionCaseInsensitiveUTF8(resource, '.$this->quote($resource).') > 0';
+            } else {
+                $where[] = 'resource = '.$this->quote($resource);
+            }
         }
 
-        if ($from = $this->timestamp($filters['from'] ?? null)) {
+        foreach ([
+            'requestId' => ['request_id', 'requestId'],
+            'server' => ['server_id', 'server', 'source'],
+            'player' => ['player_id', 'player', 'playerSource'],
+            'ip' => ['ip'],
+        ] as $filter => $keys) {
+            $value = trim((string) ($filters[$filter] ?? ''));
+
+            if ($value === '') {
+                continue;
+            }
+
+            $needle = $this->quote($value);
+            $where[] = '('.implode(' OR ', array_map(
+                fn ($key) => '(positionCaseInsensitiveUTF8(JSONExtractString(metadata, '.$this->quote($key)."), {$needle}) > 0 OR positionCaseInsensitiveUTF8(JSONExtractRaw(metadata, ".$this->quote($key)."), {$needle}) > 0)",
+                $keys,
+            )).')';
+        }
+
+        $metadataKey = $this->metadataKey($filters['metadataKey'] ?? '');
+        $metadataValue = trim((string) ($filters['metadataValue'] ?? ''));
+        if ($metadataKey !== null && $metadataValue !== '') {
+            $key = $this->quote($metadataKey);
+            $value = $this->quote($metadataValue);
+            $where[] = "(positionCaseInsensitiveUTF8(JSONExtractString(metadata, {$key}), {$value}) > 0 OR positionCaseInsensitiveUTF8(JSONExtractRaw(metadata, {$key}), {$value}) > 0)";
+        } elseif ($metadataKey !== null) {
+            $where[] = 'JSONHas(metadata, '.$this->quote($metadataKey).')';
+        }
+
+        if (($durationMin = $this->number($filters['durationMin'] ?? null)) !== null) {
+            $where[] = $this->durationExpression().' >= '.$durationMin;
+        }
+
+        if (($durationMax = $this->number($filters['durationMax'] ?? null)) !== null) {
+            $where[] = $this->durationExpression().' <= '.$durationMax;
+        }
+
+        if ($from = $this->fromTimestamp($filters)) {
             $where[] = 'occurred_at >= toDateTime64('.$this->quote($from->format('Y-m-d H:i:s.v')).', 3)';
         }
 
@@ -225,6 +290,16 @@ class ClickHouseLogStorage implements LogStorage
         }
 
         return 'WHERE '.implode(' AND ', $where);
+    }
+
+    private function orderClause(array $filters): string
+    {
+        return match ((string) ($filters['sort'] ?? 'newest')) {
+            'oldest' => 'ORDER BY occurred_at ASC, id ASC',
+            'level' => 'ORDER BY level ASC, occurred_at DESC, id DESC',
+            'resource' => 'ORDER BY resource ASC, occurred_at DESC, id DESC',
+            default => 'ORDER BY occurred_at DESC, id DESC',
+        };
     }
 
     private function table(): string
@@ -243,6 +318,66 @@ class ClickHouseLogStorage implements LogStorage
     private function quote(string $value): string
     {
         return "'".str_replace("'", "''", $value)."'";
+    }
+
+    private function fromTimestamp(array $filters): ?Carbon
+    {
+        if ($from = $this->timestamp($filters['from'] ?? null)) {
+            return $from;
+        }
+
+        return match ((string) ($filters['timeframe'] ?? '')) {
+            '15m' => now()->subMinutes(15),
+            '1h' => now()->subHour(),
+            '6h' => now()->subHours(6),
+            '24h' => now()->subDay(),
+            '7d' => now()->subDays(7),
+            '30d' => now()->subDays(30),
+            default => null,
+        };
+    }
+
+    private function levels(array $filters): array
+    {
+        $value = $filters['levels'] ?? $filters['level'] ?? '';
+        $levels = is_array($value) ? $value : preg_split('/[,|]/', (string) $value);
+
+        return collect($levels ?: [])
+            ->map(fn ($level) => $this->normalizeLevel((string) $level))
+            ->filter(fn ($level) => in_array($level, ['debug', 'info', 'warn', 'error', 'fatal'], true))
+            ->values()
+            ->unique()
+            ->all();
+    }
+
+    private function metadataKey(mixed $value): ?string
+    {
+        $key = trim((string) $value);
+
+        if ($key === '' || ! preg_match('/^[A-Za-z0-9_.-]{1,80}$/', $key)) {
+            return null;
+        }
+
+        return $key;
+    }
+
+    private function number(mixed $value): ?float
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return is_numeric($value) ? (float) $value : null;
+    }
+
+    private function durationExpression(): string
+    {
+        return "greatest(JSONExtractFloat(metadata, 'duration_ms'), JSONExtractFloat(metadata, 'duration'), ifNull(toFloat64OrNull(JSONExtractString(metadata, 'duration_ms')), 0), ifNull(toFloat64OrNull(JSONExtractString(metadata, 'duration')), 0))";
+    }
+
+    private function perPage(mixed $value): int
+    {
+        return max(10, min(250, (int) ($value ?: 25)));
     }
 
     private function metadata(array $entry): array

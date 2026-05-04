@@ -197,6 +197,55 @@ class FivemanageCompatibilityTest extends TestCase
             ->assertSee('Logs');
     }
 
+    public function test_logs_dashboard_supports_advanced_filters_and_export(): void
+    {
+        [$plainToken, , $team] = $this->apiKey();
+        $user = $team->owner;
+
+        $this->postJson('/api/logs', [
+            [
+                'level' => 'error',
+                'message' => 'Trace failure on inventory sync',
+                'resource' => 'ox_inventory',
+                'metadata' => [
+                    'request_id' => 'req_trace_1',
+                    'server_id' => 'prod-rp-1',
+                    'playerSource' => 42,
+                    'duration_ms' => 380,
+                ],
+            ],
+            [
+                'level' => 'info',
+                'message' => 'Unrelated heartbeat',
+                'resource' => 'server',
+                'metadata' => ['request_id' => 'req_other'],
+            ],
+        ], [
+            'Authorization' => $plainToken,
+        ])->assertOk();
+
+        $this->actingAs($user)
+            ->get('/logs?levels=error,warn&requestId=req_trace_1&server=prod-rp-1&player=42&durationMin=200&metadataKey=duration_ms&metadataValue=380&sort=oldest&perPage=50')
+            ->assertOk()
+            ->assertSee('Trace failure on inventory sync')
+            ->assertDontSee('Unrelated heartbeat');
+
+        $csv = $this->actingAs($user)
+            ->get('/logs/export?levels=error&requestId=req_trace_1&format=csv')
+            ->assertOk()
+            ->streamedContent();
+
+        $this->assertStringContainsString('Trace failure on inventory sync', $csv);
+        $this->assertStringNotContainsString('Unrelated heartbeat', $csv);
+
+        $json = $this->actingAs($user)
+            ->get('/logs/export?levels=error&requestId=req_trace_1&format=json')
+            ->assertOk()
+            ->streamedContent();
+
+        $this->assertStringContainsString('req_trace_1', $json);
+    }
+
     private function apiKey(): array
     {
         Storage::fake('public');

@@ -5,20 +5,33 @@ import { Head, router } from '@inertiajs/react';
 import {
     Activity,
     Calendar,
+    ChevronDown,
     Copy,
     Download,
+    FileJson,
     Filter,
     Folder,
+    ListFilter,
     MoreHorizontal,
     Plus,
     RotateCcw,
     Search,
+    SlidersHorizontal,
     X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 const LEVELS = ['debug', 'info', 'warn', 'error', 'fatal'];
 const FILTER_LEVELS = ['all', ...LEVELS];
+const TIMEFRAMES = [
+    { value: '', label: 'Custom' },
+    { value: '15m', label: '15m' },
+    { value: '1h', label: '1h' },
+    { value: '6h', label: '6h' },
+    { value: '24h', label: '24h' },
+    { value: '7d', label: '7d' },
+    { value: '30d', label: '30d' },
+];
 
 export default function LogsIndex({ auth, team, filters, summary, logs }) {
     const [draft, setDraft] = useState(normalizeFilters(filters));
@@ -26,6 +39,7 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
     const [liveSummary, setLiveSummary] = useState(summary);
     const [selectedId, setSelectedId] = useState(null);
     const [tail, setTail] = useState(true);
+    const [advancedOpen, setAdvancedOpen] = useState(false);
     const [liveCount, setLiveCount] = useState(0);
     const newIdsRef = useRef(new Set());
 
@@ -95,28 +109,62 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
 
     const updateDraft = (key, value) => setDraft((current) => ({ ...current, [key]: value }));
 
+    const navigate = (next, options = {}) => {
+        const params = serializeFilters(next);
+        setDraft(next);
+        router.get(route('logs.index'), params, { preserveState: true, replace: true, ...options });
+    };
+
     const submitFilters = (event) => {
         event.preventDefault();
-        router.get(route('logs.index'), { ...draft, page: undefined }, { preserveState: true, replace: true });
+        navigate(draft);
     };
 
     const setLevel = (level) => {
-        const next = { ...draft, level };
-        setDraft(next);
-        router.get(route('logs.index'), { ...next, page: undefined }, { preserveState: true, replace: true });
+        const current = normalizeLevels(draft.levels);
+        let levels;
+
+        if (level === 'all') {
+            levels = ['all'];
+        } else if (current.includes(level)) {
+            levels = current.filter((item) => item !== level);
+            if (levels.length === 0) levels = ['all'];
+        } else {
+            levels = [...current.filter((item) => item !== 'all'), level];
+        }
+
+        navigate({ ...draft, levels, level: levels.includes('all') ? 'all' : levels.join(',') });
     };
 
     const setResourceFilter = (resource) => {
-        const next = { ...draft, resource, page: undefined };
-        setDraft(next);
-        router.get(route('logs.index'), next, { preserveState: true, replace: true });
+        navigate({ ...draft, resource, resourceMode: resource ? draft.resourceMode : 'exact' });
+    };
+
+    const setTimeframe = (timeframe) => {
+        navigate({ ...draft, timeframe, from: '', to: '' });
     };
 
     const clearFilters = () => {
-        const next = { q: '', level: 'all', resource: '', from: '', to: '', perPage: 25 };
-        setDraft(next);
-        router.get(route('logs.index'), next, { preserveState: true, replace: true });
+        navigate(defaultFilters());
     };
+
+    const exportLogs = (format = 'csv') => {
+        window.location.assign(route('logs.export', { ...serializeFilters(draft), format }));
+    };
+
+    const traceLog = (log) => {
+        const traceId = requestId(log);
+
+        if (traceId && traceId !== log.id) {
+            navigate({ ...draft, requestId: traceId, q: '', qMode: 'all' });
+
+            return;
+        }
+
+        navigate({ ...draft, q: log.id || log.message || '', qMode: 'all' });
+    };
+
+    const activeFilterCount = countActiveFilters(draft);
 
     return (
         <AuthenticatedLayout user={auth.user}>
@@ -130,9 +178,13 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
                         <p className="fb-page-subtitle">Search, tail and inspect cloud logs ingested via the Fivemanage-compatible API.</p>
                     </div>
                     <div className="fb-page-actions">
-                        <button type="button" className="fb-button sm">
+                        <button type="button" className="fb-button sm" onClick={() => exportLogs('csv')}>
                             <Download className="h-3.5 w-3.5" />
-                            Export
+                            Export CSV
+                        </button>
+                        <button type="button" className="fb-button sm" onClick={() => exportLogs('json')}>
+                            <FileJson className="h-3.5 w-3.5" />
+                            JSON
                         </button>
                         <Badge>{liveSummary.driver === 'clickhouse' ? 'ClickHouse' : 'Database'} storage</Badge>
                         <Badge variant={liveCount > 0 ? 'green' : 'default'}>{liveCount > 0 ? `+${liveCount} live` : 'Live ready'}</Badge>
@@ -201,6 +253,18 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
                         <span>/</span>
                     </label>
 
+                    <select
+                        className="fb-chip fb-chip-select"
+                        value={draft.qMode}
+                        onChange={(event) => updateDraft('qMode', event.target.value)}
+                        aria-label="Search scope"
+                    >
+                        <option value="all">all fields</option>
+                        <option value="message">message</option>
+                        <option value="resource">resource</option>
+                        <option value="metadata">metadata</option>
+                    </select>
+
                     {draft.resource ? (
                         <button type="button" className="fb-chip active" onClick={() => setResourceFilter('')}>
                             <Folder className="h-3 w-3" />
@@ -211,12 +275,31 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
                         <button
                             type="button"
                             className="fb-chip"
-                            onClick={() => liveSummary.resources?.[0]?.resource && setResourceFilter(liveSummary.resources[0].resource)}
+                            onClick={() => {
+                                if (liveSummary.resources?.[0]?.resource) {
+                                    setResourceFilter(liveSummary.resources[0].resource);
+                                } else {
+                                    setAdvancedOpen(true);
+                                }
+                            }}
                         >
                             <Plus className="h-3 w-3" />
                             resource
                         </button>
                     )}
+
+                    <div className="fb-timeframes">
+                        {TIMEFRAMES.filter((item) => item.value).map((item) => (
+                            <button
+                                key={item.value}
+                                type="button"
+                                className={draft.timeframe === item.value ? 'active' : ''}
+                                onClick={() => setTimeframe(item.value)}
+                            >
+                                {item.label}
+                            </button>
+                        ))}
+                    </div>
 
                     <label className="fb-chip fb-date-chip">
                         <Calendar className="h-3 w-3" />
@@ -224,6 +307,7 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
                             type="datetime-local"
                             value={draft.from}
                             onChange={(event) => updateDraft('from', event.target.value)}
+                            onFocus={() => updateDraft('timeframe', '')}
                         />
                     </label>
 
@@ -233,12 +317,23 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
                             type="datetime-local"
                             value={draft.to}
                             onChange={(event) => updateDraft('to', event.target.value)}
+                            onFocus={() => updateDraft('timeframe', '')}
                         />
                     </label>
 
                     <button type="submit" className="fb-button sm">
                         <Filter className="h-3.5 w-3.5" />
                         Filter
+                    </button>
+                    <button
+                        type="button"
+                        className={`fb-button sm ${advancedOpen ? 'primary' : ''}`}
+                        onClick={() => setAdvancedOpen((value) => !value)}
+                    >
+                        <SlidersHorizontal className="h-3.5 w-3.5" />
+                        Advanced
+                        {activeFilterCount > 0 && <span className="fb-button-count">{activeFilterCount}</span>}
+                        <ChevronDown className="h-3 w-3" />
                     </button>
                     <button type="button" className="fb-button sm icon" onClick={clearFilters} title="Clear filters">
                         <RotateCcw className="h-3.5 w-3.5" />
@@ -250,7 +345,7 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
                                 key={level}
                                 type="button"
                                 onClick={() => setLevel(level)}
-                                className={draft.level === level ? 'active' : ''}
+                                className={levelIsActive(draft.levels, level) ? 'active' : ''}
                             >
                                 {level !== 'all' && <span className="fb-lvl-dot" style={{ background: `var(--lvl-${level})` }} />}
                                 {level}
@@ -267,6 +362,17 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
                         <span className="fb-tail-pulse" />
                         {tail ? 'Live tail' : 'Paused'}
                     </button>
+
+                    {advancedOpen && (
+                        <AdvancedFilters
+                            draft={draft}
+                            resources={liveSummary.resources || []}
+                            onChange={updateDraft}
+                            onApply={submitFilters}
+                            onExport={exportLogs}
+                            onClear={clearFilters}
+                        />
+                    )}
                 </form>
 
                 <div className={`fb-log-viewer ${selectedLog ? 'with-detail' : ''}`}>
@@ -315,6 +421,7 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
                             log={selectedLog}
                             onClose={() => setSelectedId(null)}
                             onFilterResource={(resource) => setResourceFilter(resource)}
+                            onTrace={traceLog}
                         />
                     )}
                 </div>
@@ -322,6 +429,142 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
                 {logs.meta.lastPage > 1 && <Pagination links={logs.links} />}
             </div>
         </AuthenticatedLayout>
+    );
+}
+
+function AdvancedFilters({ draft, resources, onChange, onExport, onClear }) {
+    return (
+        <div className="fb-advanced-filters">
+            <div className="fb-advanced-head">
+                <div>
+                    <strong>Advanced filters</strong>
+                    <span>ClickHouse-backed fields, metadata extraction, time windows, sorting and exports.</span>
+                </div>
+                <div className="fb-advanced-actions">
+                    <button type="button" className="fb-button sm" onClick={() => onExport('csv')}>
+                        <Download className="h-3.5 w-3.5" />
+                        CSV
+                    </button>
+                    <button type="button" className="fb-button sm" onClick={() => onExport('json')}>
+                        <FileJson className="h-3.5 w-3.5" />
+                        JSON
+                    </button>
+                    <button type="button" className="fb-button sm" onClick={onClear}>
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        Reset
+                    </button>
+                    <button type="submit" className="fb-button sm primary">
+                        <Filter className="h-3.5 w-3.5" />
+                        Apply
+                    </button>
+                </div>
+            </div>
+
+            <div className="fb-advanced-grid">
+                <label className="fb-advanced-field">
+                    Resource
+                    <input
+                        list="fb-log-resources"
+                        value={draft.resource}
+                        placeholder="fivebucket, server, ox_inventory"
+                        onChange={(event) => onChange('resource', event.target.value)}
+                    />
+                    <datalist id="fb-log-resources">
+                        {resources.map((resource) => (
+                            <option key={resource.resource} value={resource.resource}>{resource.count}</option>
+                        ))}
+                    </datalist>
+                </label>
+
+                <label className="fb-advanced-field">
+                    Resource mode
+                    <select value={draft.resourceMode} onChange={(event) => onChange('resourceMode', event.target.value)}>
+                        <option value="exact">Exact match</option>
+                        <option value="contains">Contains</option>
+                    </select>
+                </label>
+
+                <label className="fb-advanced-field">
+                    Request ID
+                    <input value={draft.requestId} placeholder="req_..." onChange={(event) => onChange('requestId', event.target.value)} />
+                </label>
+
+                <label className="fb-advanced-field">
+                    Server
+                    <input value={draft.server} placeholder="prod-rp-1" onChange={(event) => onChange('server', event.target.value)} />
+                </label>
+
+                <label className="fb-advanced-field">
+                    Player
+                    <input value={draft.player} placeholder="source, steam id, name" onChange={(event) => onChange('player', event.target.value)} />
+                </label>
+
+                <label className="fb-advanced-field">
+                    IP
+                    <input value={draft.ip} placeholder="51.15.23.42" onChange={(event) => onChange('ip', event.target.value)} />
+                </label>
+
+                <label className="fb-advanced-field">
+                    Metadata key
+                    <input value={draft.metadataKey} placeholder="job, action, vehicle" onChange={(event) => onChange('metadataKey', event.target.value)} />
+                </label>
+
+                <label className="fb-advanced-field">
+                    Metadata value
+                    <input value={draft.metadataValue} placeholder="police, spawn, sultan" onChange={(event) => onChange('metadataValue', event.target.value)} />
+                </label>
+
+                <label className="fb-advanced-field">
+                    Min duration ms
+                    <input type="number" min="0" value={draft.durationMin} placeholder="200" onChange={(event) => onChange('durationMin', event.target.value)} />
+                </label>
+
+                <label className="fb-advanced-field">
+                    Max duration ms
+                    <input type="number" min="0" value={draft.durationMax} placeholder="2500" onChange={(event) => onChange('durationMax', event.target.value)} />
+                </label>
+
+                <label className="fb-advanced-field">
+                    Sort
+                    <select value={draft.sort} onChange={(event) => onChange('sort', event.target.value)}>
+                        <option value="newest">Newest first</option>
+                        <option value="oldest">Oldest first</option>
+                        <option value="level">Level</option>
+                        <option value="resource">Resource</option>
+                    </select>
+                </label>
+
+                <label className="fb-advanced-field">
+                    Rows
+                    <select value={draft.perPage} onChange={(event) => onChange('perPage', event.target.value)}>
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="250">250</option>
+                    </select>
+                </label>
+            </div>
+
+            <div className="fb-advanced-presets">
+                <span><ListFilter className="h-3.5 w-3.5" /> Time range</span>
+                {TIMEFRAMES.map((item) => (
+                    <button
+                        key={item.value || 'custom'}
+                        type="button"
+                        className={draft.timeframe === item.value ? 'active' : ''}
+                        onClick={() => {
+                            onChange('timeframe', item.value);
+                            if (item.value) {
+                                onChange('from', '');
+                                onChange('to', '');
+                            }
+                        }}
+                    >
+                        {item.label}
+                    </button>
+                ))}
+            </div>
+        </div>
     );
 }
 
@@ -402,7 +645,15 @@ function LogLine({ log, selected, fresh, onSelect }) {
                 >
                     <Copy className="h-3 w-3" />
                 </button>
-                <button type="button" className="fb-icon-btn" title="More" onClick={(event) => event.stopPropagation()}>
+                <button
+                    type="button"
+                    className="fb-icon-btn"
+                    title="Open details"
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        onSelect();
+                    }}
+                >
                     <MoreHorizontal className="h-3 w-3" />
                 </button>
             </div>
@@ -410,7 +661,7 @@ function LogLine({ log, selected, fresh, onSelect }) {
     );
 }
 
-function LogDetail({ log, onClose, onFilterResource }) {
+function LogDetail({ log, onClose, onFilterResource, onTrace }) {
     const metadata = log.metadata || {};
     const context = detailContext(log);
 
@@ -468,7 +719,7 @@ function LogDetail({ log, onClose, onFilterResource }) {
                                 Filter resource
                             </button>
                         )}
-                        <button type="button" className="fb-button sm">
+                        <button type="button" className="fb-button sm" onClick={() => onTrace(log)}>
                             <Activity className="h-3 w-3" />
                             Trace
                         </button>
@@ -486,14 +737,130 @@ function LevelPill({ level }) {
 }
 
 function normalizeFilters(value = {}) {
+    const levels = normalizeLevels(value.levels || value.level);
+
     return {
         q: value.q || '',
+        qMode: value.qMode || 'all',
         level: value.level || 'all',
+        levels,
         resource: value.resource || '',
+        resourceMode: value.resourceMode || 'exact',
+        requestId: value.requestId || '',
+        server: value.server || '',
+        player: value.player || '',
+        ip: value.ip || '',
+        metadataKey: value.metadataKey || '',
+        metadataValue: value.metadataValue || '',
+        durationMin: value.durationMin || '',
+        durationMax: value.durationMax || '',
         from: value.from || '',
         to: value.to || '',
+        timeframe: value.timeframe || '',
+        sort: value.sort || 'newest',
         perPage: value.perPage || 25,
     };
+}
+
+function defaultFilters() {
+    return {
+        q: '',
+        qMode: 'all',
+        level: 'all',
+        levels: ['all'],
+        resource: '',
+        resourceMode: 'exact',
+        requestId: '',
+        server: '',
+        player: '',
+        ip: '',
+        metadataKey: '',
+        metadataValue: '',
+        durationMin: '',
+        durationMax: '',
+        from: '',
+        to: '',
+        timeframe: '',
+        sort: 'newest',
+        perPage: 25,
+    };
+}
+
+function normalizeLevels(value) {
+    const raw = Array.isArray(value) ? value : String(value || 'all').split(/[,|]/);
+    const levels = raw
+        .map((level) => String(level || '').trim().toLowerCase())
+        .map((level) => (level === 'warning' ? 'warn' : level))
+        .filter((level) => LEVELS.includes(level));
+
+    return levels.length === 0 ? ['all'] : [...new Set(levels)];
+}
+
+function serializeFilters(value) {
+    const filters = normalizeFilters(value);
+    const levels = normalizeLevels(filters.levels);
+
+    return {
+        q: filters.q || undefined,
+        qMode: filters.qMode !== 'all' ? filters.qMode : undefined,
+        level: levels.includes('all') ? 'all' : undefined,
+        levels: levels.includes('all') ? undefined : levels.join(','),
+        resource: filters.resource || undefined,
+        resourceMode: filters.resource && filters.resourceMode !== 'exact' ? filters.resourceMode : undefined,
+        requestId: filters.requestId || undefined,
+        server: filters.server || undefined,
+        player: filters.player || undefined,
+        ip: filters.ip || undefined,
+        metadataKey: filters.metadataKey || undefined,
+        metadataValue: filters.metadataValue || undefined,
+        durationMin: filters.durationMin || undefined,
+        durationMax: filters.durationMax || undefined,
+        from: filters.from || undefined,
+        to: filters.to || undefined,
+        timeframe: filters.timeframe || undefined,
+        sort: filters.sort !== 'newest' ? filters.sort : undefined,
+        perPage: Number(filters.perPage) !== 25 ? filters.perPage : undefined,
+        page: undefined,
+    };
+}
+
+function levelIsActive(levels, level) {
+    const normalized = normalizeLevels(levels);
+
+    if (level === 'all') {
+        return normalized.includes('all');
+    }
+
+    return normalized.includes(level);
+}
+
+function countActiveFilters(value) {
+    const filters = normalizeFilters(value);
+    const levels = normalizeLevels(filters.levels);
+    const keys = [
+        'q',
+        'resource',
+        'requestId',
+        'server',
+        'player',
+        'ip',
+        'metadataKey',
+        'metadataValue',
+        'durationMin',
+        'durationMax',
+        'from',
+        'to',
+        'timeframe',
+    ];
+    let count = keys.filter((key) => filters[key]).length;
+
+    if (!levels.includes('all')) count++;
+    if (filters.qMode !== 'all') count++;
+    if (filters.resource && filters.resourceMode !== 'exact') count++;
+    if (filters.sort !== 'newest') count++;
+    if (Number(filters.perPage) !== 25) count++;
+
+    return count;
 }
 
 function normalizeBuckets(value) {
@@ -574,41 +941,107 @@ function incrementSummary(summary, incoming) {
 }
 
 function matchesFilters(log, filters) {
-    if (filters.level && filters.level !== 'all' && safeLevel(log.level) !== filters.level) {
+    const normalized = normalizeFilters(filters);
+    const levels = normalizeLevels(normalized.levels);
+    const metadata = log.metadata || {};
+
+    if (!levels.includes('all') && !levels.includes(safeLevel(log.level))) {
         return false;
     }
 
-    if (filters.resource && log.resource !== filters.resource) {
-        return false;
+    if (normalized.resource) {
+        const resource = String(log.resource || '').toLowerCase();
+        const filter = normalized.resource.toLowerCase();
+
+        if (normalized.resourceMode === 'contains') {
+            if (!resource.includes(filter)) return false;
+        } else if (resource !== filter) {
+            return false;
+        }
     }
 
-    const query = (filters.q || '').trim().toLowerCase();
+    const query = (normalized.q || '').trim().toLowerCase();
     if (query) {
-        const metadata = JSON.stringify(log.metadata || {}).toLowerCase();
-        const haystack = `${log.message || ''} ${log.resource || ''} ${metadata}`.toLowerCase();
+        const metadataText = JSON.stringify(metadata).toLowerCase();
+        const haystack = {
+            message: String(log.message || '').toLowerCase(),
+            resource: String(log.resource || '').toLowerCase(),
+            metadata: metadataText,
+            all: `${log.message || ''} ${log.resource || ''} ${metadataText}`.toLowerCase(),
+        }[normalized.qMode] || `${log.message || ''} ${log.resource || ''} ${metadataText}`.toLowerCase();
 
         if (!haystack.includes(query)) {
             return false;
         }
     }
 
-    if (filters.from || filters.to) {
+    if (normalized.requestId && !metadataValueIncludes(metadata, ['request_id', 'requestId'], normalized.requestId)) return false;
+    if (normalized.server && !metadataValueIncludes(metadata, ['server_id', 'server', 'source'], normalized.server)) return false;
+    if (normalized.player && !metadataValueIncludes(metadata, ['player_id', 'player', 'playerSource'], normalized.player)) return false;
+    if (normalized.ip && !metadataValueIncludes(metadata, ['ip'], normalized.ip)) return false;
+
+    if (normalized.metadataKey) {
+        const value = metadataPath(metadata, normalized.metadataKey);
+        if (value === undefined) return false;
+        if (normalized.metadataValue && !String(value).toLowerCase().includes(normalized.metadataValue.toLowerCase())) return false;
+    }
+
+    const duration = Number(metadata.duration_ms ?? metadata.duration ?? 0);
+    if (normalized.durationMin && duration < Number(normalized.durationMin)) return false;
+    if (normalized.durationMax && duration > Number(normalized.durationMax)) return false;
+
+    if (normalized.from || normalized.to || normalized.timeframe) {
         const occurredAt = log.occurredAtIso ? new Date(log.occurredAtIso) : null;
 
         if (!occurredAt || Number.isNaN(occurredAt.getTime())) {
             return false;
         }
 
-        if (filters.from && occurredAt < new Date(filters.from)) {
+        if (normalized.from && occurredAt < new Date(normalized.from)) {
             return false;
         }
 
-        if (filters.to && occurredAt > new Date(filters.to)) {
+        if (normalized.to && occurredAt > new Date(normalized.to)) {
+            return false;
+        }
+
+        const timeframeStart = timeframeStartDate(normalized.timeframe);
+        if (!normalized.from && timeframeStart && occurredAt < timeframeStart) {
             return false;
         }
     }
 
     return true;
+}
+
+function metadataValueIncludes(metadata, keys, needle) {
+    const expected = String(needle || '').toLowerCase();
+
+    return keys.some((key) => {
+        const value = metadataPath(metadata, key);
+
+        return value !== undefined && String(value).toLowerCase().includes(expected);
+    });
+}
+
+function metadataPath(metadata, path) {
+    return String(path || '')
+        .split('.')
+        .filter(Boolean)
+        .reduce((value, key) => (value && typeof value === 'object' ? value[key] : undefined), metadata);
+}
+
+function timeframeStartDate(value) {
+    const now = Date.now();
+
+    return {
+        '15m': new Date(now - 15 * 60 * 1000),
+        '1h': new Date(now - 60 * 60 * 1000),
+        '6h': new Date(now - 6 * 60 * 60 * 1000),
+        '24h': new Date(now - 24 * 60 * 60 * 1000),
+        '7d': new Date(now - 7 * 24 * 60 * 60 * 1000),
+        '30d': new Date(now - 30 * 24 * 60 * 60 * 1000),
+    }[value] || null;
 }
 
 function detailContext(log) {

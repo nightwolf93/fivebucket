@@ -12,6 +12,8 @@ interface LogStorage
 
     public function search(Team $team, array $filters = []): LengthAwarePaginator;
 
+    public function export(Team $team, array $filters = [], int $limit = 5000): array;
+
     public function summary(Team $team): array;
 
     public function recent(Team $team, int $limit = 10): array;

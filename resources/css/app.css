@@ -1180,6 +1180,173 @@
         outline: 0;
     }
 
+    .fb-chip-select {
+        min-width: 112px;
+        border-style: solid;
+        background: var(--bg);
+        outline: 0;
+    }
+
+    .fb-timeframes {
+        display: inline-flex;
+        height: 30px;
+        align-items: center;
+        gap: 2px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--bg);
+        padding: 2px;
+    }
+
+    .fb-timeframes button {
+        height: 100%;
+        border: 0;
+        border-radius: 4px;
+        background: transparent;
+        padding: 0 8px;
+        color: var(--fg-muted);
+        font-size: 11px;
+        font-weight: 550;
+    }
+
+    .fb-timeframes button:hover {
+        color: var(--fg);
+    }
+
+    .fb-timeframes button.active {
+        background: var(--bg-elev-2);
+        color: var(--fg);
+        box-shadow: inset 0 0 0 1px var(--border);
+    }
+
+    .fb-button-count {
+        display: inline-flex;
+        min-width: 16px;
+        height: 16px;
+        align-items: center;
+        justify-content: center;
+        border-radius: 999px;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: var(--font-mono);
+        font-size: 10px;
+    }
+
+    .fb-advanced-filters {
+        flex: 1 0 100%;
+        border-top: 1px solid var(--border);
+        padding-top: 10px;
+    }
+
+    .fb-advanced-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 10px;
+    }
+
+    .fb-advanced-head strong {
+        display: block;
+        color: var(--fg);
+        font-size: 12px;
+        font-weight: 650;
+    }
+
+    .fb-advanced-head span {
+        display: block;
+        margin-top: 2px;
+        color: var(--fg-dim);
+        font-size: 11px;
+    }
+
+    .fb-advanced-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 6px;
+    }
+
+    .fb-advanced-grid {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 8px;
+    }
+
+    .fb-advanced-field {
+        display: grid;
+        gap: 4px;
+        color: var(--fg-dim);
+        font-size: 10px;
+        font-weight: 650;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+    }
+
+    .fb-advanced-field input,
+    .fb-advanced-field select {
+        min-width: 0;
+        height: 30px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--bg);
+        padding: 0 9px;
+        color: var(--fg);
+        font-size: 12px;
+        font-weight: 450;
+        letter-spacing: 0;
+        outline: 0;
+        text-transform: none;
+    }
+
+    .fb-advanced-field input:focus,
+    .fb-advanced-field select:focus {
+        border-color: var(--accent-border);
+        box-shadow: 0 0 0 3px var(--accent-bg);
+    }
+
+    .fb-advanced-field input::placeholder {
+        color: var(--fg-dim);
+    }
+
+    .fb-advanced-presets {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 10px;
+        color: var(--fg-muted);
+        font-size: 11px;
+    }
+
+    .fb-advanced-presets span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-right: 4px;
+        color: var(--fg-dim);
+        font-weight: 650;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+    }
+
+    .fb-advanced-presets button {
+        height: 26px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--bg);
+        padding: 0 9px;
+        color: var(--fg-muted);
+        font-size: 11px;
+        font-weight: 550;
+    }
+
+    .fb-advanced-presets button:hover,
+    .fb-advanced-presets button.active {
+        border-color: var(--accent-border);
+        background: var(--accent-bg);
+        color: var(--accent-strong);
+    }
+
     .fb-logs-levels {
         display: inline-flex;
         height: 30px;
