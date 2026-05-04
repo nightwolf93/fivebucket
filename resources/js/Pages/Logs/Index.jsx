@@ -5,6 +5,7 @@ import { Head, router } from '@inertiajs/react';
 import {
     Activity,
     Bookmark,
+    Bell,
     Calendar,
     ChevronDown,
     Copy,
@@ -895,6 +896,18 @@ function LogDetail({ log, onClose, onFilterResource, onApplyMetadataFilter, onTr
         message: log.message,
         metadata,
     };
+    const createAlertFromLog = () => {
+        window.localStorage?.setItem('fivebucket.alertDraftFromLog', JSON.stringify({
+            id: log.id,
+            level: safeLevel(log.level),
+            occurredAtIso: log.occurredAtIso,
+            resource: log.resource,
+            message: log.message,
+            metadata,
+        }));
+
+        router.visit(route('alerts.index'));
+    };
 
     return (
         <aside className="fb-log-detail">
@@ -941,6 +954,10 @@ function LogDetail({ log, onClose, onFilterResource, onApplyMetadataFilter, onTr
                         <button type="button" className="fb-button sm" onClick={() => onTrace(log)}>
                             <Activity className="h-3 w-3" />
                             Trace
+                        </button>
+                        <button type="button" className="fb-button sm primary" onClick={createAlertFromLog}>
+                            <Bell className="h-3 w-3" />
+                            Create alert
                         </button>
                     </div>
                 </section>

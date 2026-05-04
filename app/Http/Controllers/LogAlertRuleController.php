@@ -4,7 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Jobs\EvaluateLogAlerts;
 use App\Models\LogAlertRule;
+use App\Services\Logs\LogStorage;
 use App\Services\TeamProvisioner;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -12,9 +14,10 @@ use Inertia\Response;
 
 class LogAlertRuleController extends Controller
 {
-    public function __construct(private readonly TeamProvisioner $teams)
-    {
-    }
+    public function __construct(
+        private readonly TeamProvisioner $teams,
+        private readonly LogStorage $logs,
+    ) {}
 
     public function index(Request $request): Response
     {
@@ -84,6 +87,35 @@ class LogAlertRuleController extends Controller
         EvaluateLogAlerts::dispatchSync($team->id, $alert->id, true);
 
         return back()->with('success', 'Alert evaluation ran.');
+    }
+
+    public function preview(Request $request): JsonResponse
+    {
+        $team = $this->teams->defaultTeamFor($request->user());
+        $validated = $request->validate([
+            'filters' => ['required', 'array'],
+            'threshold_count' => ['nullable', 'integer', 'min:1', 'max:100000'],
+            'window_minutes' => ['nullable', 'integer', 'min:1', 'max:10080'],
+        ]);
+
+        $threshold = max(1, (int) ($validated['threshold_count'] ?? 1));
+        $window = max(1, (int) ($validated['window_minutes'] ?? 5));
+        $filters = $this->cleanFilters($validated['filters']);
+        unset($filters['page'], $filters['perPage'], $filters['timeframe'], $filters['from'], $filters['to']);
+
+        $filters['from'] = now()->subMinutes($window)->toIso8601String();
+        $filters['to'] = now()->toIso8601String();
+        $filters['sort'] = 'newest';
+
+        $count = $this->logs->count($team, $filters);
+
+        return response()->json([
+            'count' => $count,
+            'threshold' => $threshold,
+            'windowMinutes' => $window,
+            'willTrigger' => $count >= $threshold,
+            'samples' => $this->logs->export($team, $filters, 3),
+        ]);
     }
 
     private function validated(Request $request): array

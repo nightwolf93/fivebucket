@@ -48,6 +48,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/logs/saved-views', [LogSavedViewController::class, 'store'])->name('logs.saved-views.store');
     Route::delete('/logs/saved-views/{logSavedView}', [LogSavedViewController::class, 'destroy'])->name('logs.saved-views.destroy');
     Route::get('/alerts', [LogAlertRuleController::class, 'index'])->name('alerts.index');
+    Route::post('/alerts/preview', [LogAlertRuleController::class, 'preview'])->name('alerts.preview');
     Route::post('/alerts', [LogAlertRuleController::class, 'store'])->name('alerts.store');
     Route::patch('/alerts/{alert}', [LogAlertRuleController::class, 'update'])->name('alerts.update');
     Route::delete('/alerts/{alert}', [LogAlertRuleController::class, 'destroy'])->name('alerts.destroy');

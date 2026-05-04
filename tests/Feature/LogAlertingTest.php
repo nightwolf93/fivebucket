@@ -75,4 +75,46 @@ class LogAlertingTest extends TestCase
         $this->actingAs($user)->get('/webhooks')->assertOk();
         $this->actingAs($user)->get('/alerts')->assertOk();
     }
+
+    public function test_alert_preview_counts_matching_logs_in_window(): void
+    {
+        $user = User::factory()->create();
+        $team = app(TeamProvisioner::class)->createDefaultTeam($user);
+
+        LogEntry::create([
+            'team_id' => $team->id,
+            'level' => 'info',
+            'message' => '[atm] rope_completed',
+            'resource' => 'nw_illegal',
+            'metadata' => ['action' => 'rope_completed', 'cash' => 198, 'charId' => 1],
+            'occurred_at' => now(),
+        ]);
+        LogEntry::create([
+            'team_id' => $team->id,
+            'level' => 'info',
+            'message' => '[atm] bootstrap',
+            'resource' => 'nw_illegal',
+            'metadata' => ['action' => 'bootstrap', 'cash' => 50, 'charId' => 1],
+            'occurred_at' => now(),
+        ]);
+
+        $this->actingAs($user)
+            ->postJson('/alerts/preview', [
+                'filters' => [
+                    'level' => 'info',
+                    'resource' => 'nw_illegal',
+                    'metadataFilters' => [
+                        ['key' => 'charId', 'operator' => 'exact', 'value' => '1'],
+                        ['key' => 'action', 'operator' => 'exact', 'value' => 'rope_completed'],
+                        ['key' => 'cash', 'operator' => 'gt', 'value' => '100'],
+                    ],
+                ],
+                'threshold_count' => 1,
+                'window_minutes' => 10,
+            ])
+            ->assertOk()
+            ->assertJsonPath('count', 1)
+            ->assertJsonPath('willTrigger', true)
+            ->assertJsonCount(1, 'samples');
+    }
 }
