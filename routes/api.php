@@ -41,6 +41,10 @@ Route::prefix('v3')->group(function () {
 });
 
 Route::middleware('fivebucket.token:media')->group(function () {
+    Route::post('/image', [FileController::class, 'uploadMultipart']);
+    Route::post('/video', [FileController::class, 'uploadMultipart']);
+    Route::post('/audio', [FileController::class, 'uploadMultipart']);
+
     Route::post('/v2/image', [FileController::class, 'uploadMultipart']);
     Route::post('/v2/video', [FileController::class, 'uploadMultipart']);
     Route::post('/v2/audio', [FileController::class, 'uploadMultipart']);

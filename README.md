@@ -59,6 +59,9 @@ and:
 
 Implemented routes:
 
+- `POST /api/image`
+- `POST /api/video`
+- `POST /api/audio`
 - `GET /api/v3/file`
 - `POST /api/v3/file`
 - `POST /api/v3/file/base64`
@@ -86,7 +89,9 @@ Responses use the compatibility envelope:
 ```json
 {
   "status": "ok",
-  "data": {}
+  "data": {},
+  "url": "https://...",
+  "image": "https://..."
 }
 ```
 

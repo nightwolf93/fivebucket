@@ -2,12 +2,14 @@
 
 namespace Tests\Feature;
 
+use App\Events\MediaChanged;
 use App\Models\ApiToken;
 use App\Models\Team;
 use App\Models\User;
 use App\Services\TeamProvisioner;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -65,8 +67,11 @@ class ClientManagementTest extends TestCase
 
         $mediaFile = $team->mediaFiles()->where('public_id', $fileId)->firstOrFail();
 
+        Event::fake([MediaChanged::class]);
+
         $this->actingAs($user)->delete(route('media.destroy', $mediaFile))->assertRedirect();
         $this->assertSoftDeleted('media_files', ['id' => $mediaFile->id]);
+        Event::assertDispatched(MediaChanged::class);
     }
 
     public function test_media_can_be_uploaded_from_web_management_page(): void
@@ -79,6 +84,8 @@ class ClientManagementTest extends TestCase
 
         $user = User::factory()->create();
         $team = app(TeamProvisioner::class)->createDefaultTeam($user);
+
+        Event::fake([MediaChanged::class]);
 
         $this->actingAs($user)->post(route('media.store'), [
             'uploads' => [
@@ -102,6 +109,8 @@ class ClientManagementTest extends TestCase
             'type' => 'audio',
             'path' => 'evidence/session-1',
         ]);
+
+        Event::assertDispatchedTimes(MediaChanged::class, 2);
     }
 
     public function test_admin_can_update_team_quota_and_user_role(): void

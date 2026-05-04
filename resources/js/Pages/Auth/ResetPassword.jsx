@@ -5,6 +5,7 @@ import InputLabel from '@/Components/InputLabel';
 import PrimaryButton from '@/Components/PrimaryButton';
 import TextInput from '@/Components/TextInput';
 import { Head, useForm } from '@inertiajs/react';
+import { KeyRound } from 'lucide-react';
 
 export default function ResetPassword({ token, email }) {
     const { data, setData, post, processing, errors, reset } = useForm({
@@ -27,10 +28,10 @@ export default function ResetPassword({ token, email }) {
     };
 
     return (
-        <GuestLayout>
+        <GuestLayout title="Choose a new password" subtitle="Update the password for your FiveBucket account.">
             <Head title="Reset Password" />
 
-            <form onSubmit={submit}>
+            <form onSubmit={submit} className="fb-stack">
                 <div>
                     <InputLabel htmlFor="email" value="Email" />
 
@@ -79,8 +80,9 @@ export default function ResetPassword({ token, email }) {
                     <InputError message={errors.password_confirmation} className="mt-2" />
                 </div>
 
-                <div className="flex items-center justify-end mt-4">
-                    <PrimaryButton className="ms-4" disabled={processing}>
+                <div className="flex items-center justify-end">
+                    <PrimaryButton disabled={processing}>
+                        <KeyRound className="h-4 w-4" />
                         Reset Password
                     </PrimaryButton>
                 </div>

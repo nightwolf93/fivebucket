@@ -48,6 +48,7 @@ class MediaController extends Controller
                 'search' => $search,
             ],
             'team' => [
+                'id' => $team->id,
                 'name' => $team->name,
                 'storageUsed' => ByteFormatter::human($team->storage_used_bytes),
                 'storageLimit' => ByteFormatter::human($team->storage_limit_bytes),

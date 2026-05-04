@@ -2,12 +2,15 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Events\LogsIngested;
 use App\Http\Controllers\Controller;
 use App\Models\ApiToken;
 use App\Models\Team;
 use App\Services\Logs\LogStorage;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Str;
 use Throwable;
 
 class LogController extends Controller
@@ -57,7 +60,9 @@ class LogController extends Controller
                 ];
             }
 
-            $this->logs->store($this->team($request), $this->apiToken($request), $entries);
+            $team = $this->team($request);
+            $stored = $this->logs->store($team, $this->apiToken($request), $entries);
+            $this->broadcastLogs($team, $entries, $stored);
 
             return $this->ok();
         } catch (Throwable $exception) {
@@ -81,7 +86,9 @@ class LogController extends Controller
                 return $this->error('Log payload must be an array of log entries.', 400);
             }
 
-            $this->logs->store($this->team($request), $this->apiToken($request), $entries);
+            $team = $this->team($request);
+            $stored = $this->logs->store($team, $this->apiToken($request), $entries);
+            $this->broadcastLogs($team, $entries, $stored);
 
             return $this->ok();
         } catch (Throwable $exception) {
@@ -113,6 +120,83 @@ class LogController extends Controller
     private function ok(): JsonResponse
     {
         return response()->json(['status' => 'ok']);
+    }
+
+    private function broadcastLogs(Team $team, array $entries, int $stored): void
+    {
+        if ($stored <= 0) {
+            return;
+        }
+
+        $logs = collect($entries)
+            ->filter(fn ($entry) => is_array($entry))
+            ->map(fn (array $entry) => $this->broadcastPayload($entry))
+            ->values()
+            ->all();
+
+        if ($logs === []) {
+            return;
+        }
+
+        try {
+            event(new LogsIngested($team->id, $logs));
+        } catch (Throwable $exception) {
+            report($exception);
+        }
+    }
+
+    private function broadcastPayload(array $entry): array
+    {
+        $occurredAt = $this->timestamp($entry['timestamp'] ?? $entry['occurred_at'] ?? null) ?? now();
+
+        return [
+            'id' => (string) Str::ulid(),
+            'level' => $this->normalizeLevel((string) ($entry['level'] ?? 'info')),
+            'message' => (string) ($entry['message'] ?? ''),
+            'resource' => $entry['resource'] ?? $entry['dataset'] ?? null,
+            'metadata' => $this->metadata($entry),
+            'occurredAt' => $occurredAt->diffForHumans(),
+            'occurredAtIso' => $occurredAt->toIso8601String(),
+            'createdAt' => now()->diffForHumans(),
+        ];
+    }
+
+    private function normalizeLevel(string $level): string
+    {
+        $level = strtolower(trim($level));
+
+        return match ($level) {
+            'warning' => 'warn',
+            'err' => 'error',
+            'fatal', 'critical' => 'fatal',
+            default => $level ?: 'info',
+        };
+    }
+
+    private function metadata(array $entry): array
+    {
+        $metadata = is_array($entry['metadata'] ?? null) ? $entry['metadata'] : [];
+
+        foreach (['dataset', 'source', 'server', 'player', 'playerSource', 'tags', 'fields'] as $key) {
+            if (array_key_exists($key, $entry) && ! array_key_exists($key, $metadata)) {
+                $metadata[$key] = $entry[$key];
+            }
+        }
+
+        return $metadata;
+    }
+
+    private function timestamp(mixed $value): ?Carbon
+    {
+        if (! $value) {
+            return null;
+        }
+
+        try {
+            return Carbon::parse($value);
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     private function error(string $message, int $status): JsonResponse

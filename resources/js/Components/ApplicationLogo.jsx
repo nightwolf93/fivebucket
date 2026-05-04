@@ -1,10 +1,12 @@
-import { Cloud } from 'lucide-react';
+import { Boxes } from 'lucide-react';
 
 export default function ApplicationLogo({ className }) {
     return (
-        <span className={className}>
-            <Cloud className="h-5 w-5" />
-            <span className="font-semibold text-slate-950 dark:text-slate-50">FiveBucket</span>
+        <span className={className ?? 'flex items-center gap-2'}>
+            <span className="fb-brand-mark">
+                <Boxes className="h-4 w-4" />
+            </span>
+            <span className="fb-brand-word">FiveBucket</span>
         </span>
     );
 }

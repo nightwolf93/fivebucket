@@ -18,6 +18,11 @@ return [
             'timeout' => (int) env('CLICKHOUSE_TIMEOUT', 10),
         ],
     ],
+    'realtime' => [
+        'client_host' => env('FIVEBUCKET_WEBSOCKET_HOST', env('VITE_PUSHER_HOST')),
+        'client_port' => env('FIVEBUCKET_WEBSOCKET_PORT', env('VITE_PUSHER_PORT')),
+        'client_scheme' => env('FIVEBUCKET_WEBSOCKET_SCHEME', env('VITE_PUSHER_SCHEME')),
+    ],
     'stripe' => [
         'key' => env('STRIPE_KEY'),
         'secret' => env('STRIPE_SECRET'),

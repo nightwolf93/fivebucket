@@ -5,6 +5,7 @@ import InputLabel from '@/Components/InputLabel';
 import PrimaryButton from '@/Components/PrimaryButton';
 import TextInput from '@/Components/TextInput';
 import { Head, Link, useForm } from '@inertiajs/react';
+import { UserPlus } from 'lucide-react';
 
 export default function Register() {
     const { data, setData, post, processing, errors, reset } = useForm({
@@ -27,10 +28,14 @@ export default function Register() {
     };
 
     return (
-        <GuestLayout>
+        <GuestLayout
+            title="Create your FiveBucket account"
+            subtitle="Start with the free workspace, then upgrade storage when your server needs more capacity."
+            alt={<Link href={route('login')} className="fb-auth-alt">Sign in</Link>}
+        >
             <Head title="Register" />
 
-            <form onSubmit={submit}>
+            <form onSubmit={submit} className="fb-stack">
                 <div>
                     <InputLabel htmlFor="name" value="Name" />
 
@@ -99,15 +104,16 @@ export default function Register() {
                     <InputError message={errors.password_confirmation} className="mt-2" />
                 </div>
 
-                <div className="flex items-center justify-end mt-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                     <Link
                         href={route('login')}
-                        className="underline text-sm text-gray-600 hover:text-gray-900 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                        className="text-[12px] font-medium text-[var(--accent)] text-decoration-none hover:underline"
                     >
                         Already registered?
                     </Link>
 
-                    <PrimaryButton className="ms-4" disabled={processing}>
+                    <PrimaryButton disabled={processing}>
+                        <UserPlus className="h-4 w-4" />
                         Register
                     </PrimaryButton>
                 </div>

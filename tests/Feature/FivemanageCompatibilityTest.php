@@ -2,12 +2,14 @@
 
 namespace Tests\Feature;
 
+use App\Events\LogsIngested;
 use App\Models\ApiToken;
 use App\Models\MediaFile;
 use App\Models\User;
 use App\Services\TeamProvisioner;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -66,6 +68,42 @@ class FivemanageCompatibilityTest extends TestCase
         $this->assertDatabaseHas('media_files', ['filename' => 'evidence.png', 'type' => 'image']);
     }
 
+    public function test_legacy_media_upload_routes_match_fivemanage_shape(): void
+    {
+        [$plainToken] = $this->apiKey();
+
+        $this->post('/api/image', [
+            'image' => UploadedFile::fake()->create('camera.jpg', 32, 'image/jpeg'),
+        ], [
+            'Authorization' => $plainToken,
+        ])
+            ->assertOk()
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonStructure(['data' => ['id', 'url', 'originalUrl'], 'url', 'image']);
+
+        $this->post('/api/video', [
+            'video' => UploadedFile::fake()->create('clip.webm', 32, 'video/webm'),
+        ], [
+            'Authorization' => $plainToken,
+        ])
+            ->assertOk()
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonStructure(['data' => ['id', 'url', 'originalUrl'], 'url', 'video']);
+
+        $this->post('/api/audio', [
+            'audio' => UploadedFile::fake()->create('voice.webm', 32, 'audio/webm'),
+        ], [
+            'Authorization' => $plainToken,
+        ])
+            ->assertOk()
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonStructure(['data' => ['id', 'url', 'originalUrl'], 'url', 'audio']);
+
+        $this->assertDatabaseHas('media_files', ['filename' => 'camera.jpg', 'type' => 'image']);
+        $this->assertDatabaseHas('media_files', ['filename' => 'clip.webm', 'type' => 'video']);
+        $this->assertDatabaseHas('media_files', ['filename' => 'voice.webm', 'type' => 'audio']);
+    }
+
     public function test_presigned_upload_accepts_query_api_key_for_generation(): void
     {
         [$plainToken] = $this->apiKey();
@@ -89,6 +127,8 @@ class FivemanageCompatibilityTest extends TestCase
     public function test_logs_api_accepts_single_and_batch_payloads(): void
     {
         [$plainToken, , $team] = $this->apiKey();
+
+        Event::fake([LogsIngested::class]);
 
         $this->postJson('/api/logs', [
             'level' => 'warning',
@@ -127,6 +167,8 @@ class FivemanageCompatibilityTest extends TestCase
             'message' => 'Vehicle spawn failed',
             'resource' => 'vehicles',
         ]);
+
+        Event::assertDispatchedTimes(LogsIngested::class, 2);
     }
 
     public function test_logs_dashboard_can_filter_entries(): void

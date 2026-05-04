@@ -23,7 +23,9 @@
         "@radix-ui/react-slot": "^1.2.4",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
+        "laravel-echo": "^2.3.4",
         "lucide-react": "^1.14.0",
+        "pusher-js": "^8.5.0",
         "tailwind-merge": "^3.5.0"
     }
 }

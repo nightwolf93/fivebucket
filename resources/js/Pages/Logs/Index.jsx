@@ -1,17 +1,52 @@
-import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
+import { EmptyState, KpiCard, PageHeader, Pagination } from '@/Components/Design';
 import { Badge } from '@/Components/ui/badge';
 import { Button } from '@/Components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/Components/ui/card';
-import { Head, Link, router } from '@inertiajs/react';
+import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
+import { Head, router } from '@inertiajs/react';
 import { AlertTriangle, Database, Filter, RotateCcw, Search, Server, ShieldAlert, SlidersHorizontal } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 const levels = ['all', 'debug', 'info', 'warn', 'error', 'fatal'];
 
 export default function LogsIndex({ auth, team, filters, summary, logs }) {
     const [draft, setDraft] = useState(filters);
+    const [entries, setEntries] = useState(logs.data);
+    const [liveCount, setLiveCount] = useState(0);
 
     const updateDraft = (key, value) => setDraft((current) => ({ ...current, [key]: value }));
+
+    useEffect(() => {
+        setEntries(logs.data);
+        setLiveCount(0);
+    }, [logs.data]);
+
+    useEffect(() => {
+        if (!team?.id || !window.Echo) {
+            return undefined;
+        }
+
+        const channelName = `teams.${team.id}.logs`;
+        const channel = window.Echo.private(channelName);
+
+        channel.listen('.logs.ingested', (event) => {
+            const incoming = Array.isArray(event.logs) ? event.logs.filter((log) => matchesFilters(log, filters)) : [];
+
+            if (incoming.length === 0) {
+                return;
+            }
+
+            setEntries((current) => {
+                const seen = new Set(current.map((log) => log.id).filter(Boolean));
+                const unique = incoming.filter((log) => !log.id || !seen.has(log.id));
+
+                return [...unique, ...current].slice(0, 250);
+            });
+            setLiveCount((count) => count + incoming.length);
+        });
+
+        return () => window.Echo.leave(channelName);
+    }, [filters, team?.id]);
 
     const submitFilters = (event) => {
         event.preventDefault();
@@ -34,36 +69,39 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
         <AuthenticatedLayout user={auth.user}>
             <Head title="Logs" />
 
-            <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-                <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
-                    <div>
-                        <p className="text-sm font-medium text-slate-500">{team.slug}</p>
-                        <h1 className="mt-1 text-2xl font-semibold text-slate-950">Logs</h1>
-                        <p className="mt-2 text-sm text-slate-600">Search cloud logs sent through the Fivemanage-compatible API.</p>
-                    </div>
-                    <Badge>{summary.driver === 'clickhouse' ? 'ClickHouse' : 'Database'} storage</Badge>
+            <div className="fb-page">
+                <PageHeader
+                    eyebrow={team.slug}
+                    title="Logs"
+                    description="Search and inspect logs sent through the Fivemanage-compatible API."
+                    actions={(
+                        <div className="fb-page-actions">
+                            <Badge>{summary.driver === 'clickhouse' ? 'ClickHouse' : 'Database'} storage</Badge>
+                            <Badge variant={liveCount > 0 ? 'green' : 'default'}>{liveCount > 0 ? `+${liveCount} live` : 'Live ready'}</Badge>
+                        </div>
+                    )}
+                />
+
+                <div className="fb-kpis">
+                    <KpiCard icon={Database} label="Total logs" value={summary.total} detail="all time" tone="muted" />
+                    <KpiCard icon={Server} label="Logs 24h" value={summary.last24h} detail="recent ingest" />
+                    <KpiCard icon={ShieldAlert} label="Errors 24h" value={summary.errors24h} detail="error and fatal" tone="red" />
+                    <KpiCard icon={AlertTriangle} label="Warnings 24h" value={summary.warnings24h} detail="warning events" tone="amber" />
                 </div>
 
-                <div className="grid gap-4 lg:grid-cols-4">
-                    <Metric icon={Database} label="Total logs" value={summary.total} detail="all time" />
-                    <Metric icon={Server} label="Logs 24h" value={summary.last24h} detail="recent ingest" />
-                    <Metric icon={ShieldAlert} label="Errors 24h" value={summary.errors24h} detail="error and fatal" tone="red" />
-                    <Metric icon={AlertTriangle} label="Warnings 24h" value={summary.warnings24h} detail="warn events" tone="amber" />
-                </div>
-
-                <Card>
-                    <CardHeader className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <Card className="mb-3">
+                    <CardHeader>
                         <div>
                             <CardTitle>Search & Filters</CardTitle>
-                            <p className="mt-1 text-xs text-slate-500">{logs.meta.total} matching entries</p>
+                            <p className="fb-panel-subtitle">{logs.meta.total} matching entries</p>
                         </div>
-                        <div className="flex flex-wrap gap-2">
+                        <div className="fb-segmented">
                             {levels.map((level) => (
                                 <button
                                     key={level}
                                     type="button"
                                     onClick={() => setLevel(level)}
-                                    className={`h-8 rounded-md px-3 text-xs font-medium ${draft.level === level ? 'bg-slate-950 text-white' : 'bg-white text-slate-600 ring-1 ring-inset ring-slate-200 hover:bg-slate-50'}`}
+                                    className={draft.level === level ? 'active' : ''}
                                 >
                                     {level}
                                 </button>
@@ -71,11 +109,11 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
                         </div>
                     </CardHeader>
                     <CardContent>
-                        <form onSubmit={submitFilters} className="grid gap-3 lg:grid-cols-[1fr_180px_180px_180px_auto]">
+                        <form onSubmit={submitFilters} className="fb-grid" style={{ gridTemplateColumns: 'minmax(260px,1fr) 180px 190px 190px auto' }}>
                             <label className="relative block">
-                                <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                                <Search className="pointer-events-none absolute left-3 top-2.5 h-3.5 w-3.5 fb-dim" />
                                 <input
-                                    className="h-10 w-full rounded-md border-slate-300 pl-9 text-sm shadow-sm focus:border-slate-500 focus:ring-slate-500"
+                                    className="fb-input pl-9"
                                     placeholder="Search message, resource, metadata"
                                     value={draft.q}
                                     onChange={(event) => updateDraft('q', event.target.value)}
@@ -83,7 +121,7 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
                             </label>
 
                             <input
-                                className="h-10 rounded-md border-slate-300 text-sm shadow-sm focus:border-slate-500 focus:ring-slate-500"
+                                className="fb-input"
                                 placeholder="resource"
                                 value={draft.resource}
                                 onChange={(event) => updateDraft('resource', event.target.value)}
@@ -91,70 +129,58 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
 
                             <input
                                 type="datetime-local"
-                                className="h-10 rounded-md border-slate-300 text-sm shadow-sm focus:border-slate-500 focus:ring-slate-500"
+                                className="fb-input"
                                 value={draft.from}
                                 onChange={(event) => updateDraft('from', event.target.value)}
                             />
 
                             <input
                                 type="datetime-local"
-                                className="h-10 rounded-md border-slate-300 text-sm shadow-sm focus:border-slate-500 focus:ring-slate-500"
+                                className="fb-input"
                                 value={draft.to}
                                 onChange={(event) => updateDraft('to', event.target.value)}
                             />
 
                             <div className="flex gap-2">
-                                <Button type="submit" className="h-10">
-                                    <Filter className="h-4 w-4" />
+                                <Button type="submit">
+                                    <Filter className="h-3.5 w-3.5" />
                                     Filter
                                 </Button>
-                                <Button type="button" variant="secondary" className="h-10" onClick={clearFilters}>
-                                    <RotateCcw className="h-4 w-4" />
+                                <Button type="button" variant="secondary" size="icon" onClick={clearFilters}>
+                                    <RotateCcw className="h-3.5 w-3.5" />
                                 </Button>
                             </div>
                         </form>
                     </CardContent>
                 </Card>
 
-                <div className="grid gap-6 xl:grid-cols-[1fr_300px]">
+                <div className="fb-grid" style={{ gridTemplateColumns: 'minmax(0,1fr) 320px' }}>
                     <Card>
-                        <CardHeader className="flex flex-row items-center justify-between">
+                        <CardHeader>
                             <CardTitle>Entries</CardTitle>
-                            <SlidersHorizontal className="h-4 w-4 text-slate-400" />
+                            <SlidersHorizontal className="h-4 w-4 fb-dim" />
                         </CardHeader>
                         <CardContent>
-                            {logs.data.length === 0 ? (
-                                <Empty>No logs found.</Empty>
+                            {entries.length === 0 ? (
+                                <EmptyState>No logs found.</EmptyState>
                             ) : (
-                                <div className="overflow-hidden rounded-md border border-slate-200">
-                                    {logs.data.map((log) => (
+                                <div className="fb-table-wrap">
+                                    {entries.map((log) => (
                                         <LogRow key={log.id || `${log.occurredAtIso}-${log.message}`} log={log} />
                                     ))}
                                 </div>
                             )}
 
-                            {logs.meta.lastPage > 1 && (
-                                <div className="mt-6 flex flex-wrap gap-2">
-                                    {logs.links.map((link, index) => (
-                                        <Link
-                                            key={`${link.label}-${index}`}
-                                            href={link.url ?? '#'}
-                                            preserveScroll
-                                            className={`rounded-md border px-3 py-2 text-sm ${link.active ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-200 text-slate-700'} ${!link.url ? 'pointer-events-none opacity-50' : ''}`}
-                                            dangerouslySetInnerHTML={{ __html: link.label }}
-                                        />
-                                    ))}
-                                </div>
-                            )}
+                            {logs.meta.lastPage > 1 && <Pagination links={logs.links} />}
                         </CardContent>
                     </Card>
 
-                    <div className="space-y-6">
+                    <div className="fb-stack">
                         <Card>
                             <CardHeader>
                                 <CardTitle>Levels</CardTitle>
                             </CardHeader>
-                            <CardContent className="space-y-3">
+                            <CardContent className="fb-stack">
                                 {levels.filter((level) => level !== 'all').map((level) => (
                                     <StatBar key={level} label={level} value={summary.levels[level] ?? 0} total={summary.total} />
                                 ))}
@@ -165,21 +191,22 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
                             <CardHeader>
                                 <CardTitle>Top Resources</CardTitle>
                             </CardHeader>
-                            <CardContent className="space-y-2">
+                            <CardContent className="fb-stack">
                                 {summary.resources.length === 0 ? (
-                                    <Empty compact>No resources yet.</Empty>
+                                    <EmptyState compact>No resources yet.</EmptyState>
                                 ) : (
                                     summary.resources.map((resource) => (
                                         <button
                                             key={resource.resource}
                                             type="button"
                                             onClick={() => {
-                                                updateDraft('resource', resource.resource);
-                                                router.get(route('logs.index'), { ...draft, resource: resource.resource, page: undefined }, { preserveState: true, replace: true });
+                                                const next = { ...draft, resource: resource.resource, page: undefined };
+                                                setDraft(next);
+                                                router.get(route('logs.index'), next, { preserveState: true, replace: true });
                                             }}
-                                            className="flex w-full items-center justify-between rounded-md border border-slate-200 px-3 py-2 text-left text-sm transition hover:bg-slate-50"
+                                            className="fb-button justify-between"
                                         >
-                                            <span className="truncate font-medium text-slate-800">{resource.resource}</span>
+                                            <span className="truncate">{resource.resource}</span>
                                             <Badge>{resource.count}</Badge>
                                         </button>
                                     ))
@@ -194,48 +221,29 @@ export default function LogsIndex({ auth, team, filters, summary, logs }) {
 }
 
 function LogRow({ log }) {
+    const variant = levelVariant(log.level);
+
     return (
-        <div className="border-b border-slate-200 bg-white p-4 last:border-b-0">
+        <div className="fb-log-row">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant={levelVariant(log.level)}>{log.level}</Badge>
-                        <span className="text-xs text-slate-500">{log.resource || 'server'}</span>
-                        <span className="text-xs text-slate-400">{log.occurredAt}</span>
+                        <Badge variant={variant}>{log.level}</Badge>
+                        <span className="fb-mono text-[10px] fb-dim">{log.resource || 'server'}</span>
+                        <span className="fb-mono text-[10px] fb-dim">{log.occurredAt}</span>
                     </div>
-                    <p className="mt-2 break-words text-sm text-slate-800">{log.message || '(empty message)'}</p>
+                    <p className="mt-2 break-words text-[12px] fb-muted">{log.message || '(empty message)'}</p>
                 </div>
-                {log.occurredAtIso && <code className="shrink-0 rounded-md bg-slate-50 px-2 py-1 text-xs text-slate-500">{log.occurredAtIso}</code>}
+                {log.occurredAtIso && <code className="fb-inline-code shrink-0">{log.occurredAtIso}</code>}
             </div>
 
             {Object.keys(log.metadata || {}).length > 0 && (
                 <details className="mt-3">
-                    <summary className="cursor-pointer text-xs font-medium text-slate-500">metadata</summary>
-                    <pre className="mt-2 max-h-72 overflow-auto rounded-md bg-slate-950 p-3 text-xs text-slate-100">
-                        {JSON.stringify(log.metadata, null, 2)}
-                    </pre>
+                    <summary className="cursor-pointer text-[11px] font-medium fb-dim">metadata</summary>
+                    <pre className="fb-code mt-2 max-h-72">{JSON.stringify(log.metadata, null, 2)}</pre>
                 </details>
             )}
         </div>
-    );
-}
-
-function Metric({ icon: Icon, label, value, detail, tone = 'default' }) {
-    const toneClass = tone === 'red' ? 'bg-red-600' : tone === 'amber' ? 'bg-amber-500' : 'bg-slate-950';
-
-    return (
-        <Card>
-            <CardContent className="flex items-center gap-4">
-                <div className={`flex h-10 w-10 items-center justify-center rounded-md text-white ${toneClass}`}>
-                    <Icon className="h-5 w-5" />
-                </div>
-                <div>
-                    <div className="text-sm text-slate-500">{label}</div>
-                    <div className="text-xl font-semibold text-slate-950">{value}</div>
-                    <div className="text-xs text-slate-400">{detail}</div>
-                </div>
-            </CardContent>
-        </Card>
     );
 }
 
@@ -244,19 +252,15 @@ function StatBar({ label, value, total }) {
 
     return (
         <div>
-            <div className="flex items-center justify-between text-xs">
-                <span className="font-medium text-slate-600">{label}</span>
-                <span className="text-slate-400">{value}</span>
+            <div className="flex items-center justify-between text-[11px]">
+                <span className="font-medium fb-muted">{label}</span>
+                <span className="fb-mono fb-dim">{value}</span>
             </div>
-            <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-100">
-                <div className="h-full rounded-full bg-slate-800" style={{ width: `${percent}%` }} />
+            <div className="fb-progress mt-1">
+                <div className="fb-progress-bar" style={{ width: `${percent}%` }} />
             </div>
         </div>
     );
-}
-
-function Empty({ children, compact = false }) {
-    return <div className={`${compact ? 'py-4' : 'py-14'} text-center text-sm text-slate-500`}>{children}</div>;
 }
 
 function levelVariant(level) {
@@ -265,4 +269,42 @@ function levelVariant(level) {
     if (level === 'info') return 'green';
 
     return 'default';
+}
+
+function matchesFilters(log, filters) {
+    if (filters.level && filters.level !== 'all' && log.level !== filters.level) {
+        return false;
+    }
+
+    if (filters.resource && log.resource !== filters.resource) {
+        return false;
+    }
+
+    const query = (filters.q || '').trim().toLowerCase();
+    if (query) {
+        const metadata = JSON.stringify(log.metadata || {}).toLowerCase();
+        const haystack = `${log.message || ''} ${log.resource || ''} ${metadata}`.toLowerCase();
+
+        if (!haystack.includes(query)) {
+            return false;
+        }
+    }
+
+    if (filters.from || filters.to) {
+        const occurredAt = log.occurredAtIso ? new Date(log.occurredAtIso) : null;
+
+        if (!occurredAt || Number.isNaN(occurredAt.getTime())) {
+            return false;
+        }
+
+        if (filters.from && occurredAt < new Date(filters.from)) {
+            return false;
+        }
+
+        if (filters.to && occurredAt > new Date(filters.to)) {
+            return false;
+        }
+    }
+
+    return true;
 }

@@ -6,7 +6,7 @@ import { createInertiaApp } from '@inertiajs/react';
 import { resolvePageComponent } from 'laravel-vite-plugin/inertia-helpers';
 import { applyTheme, initialTheme } from '@/lib/theme';
 
-const appName = import.meta.env.VITE_APP_NAME || 'Laravel';
+const appName = window.FiveBucket?.name || import.meta.env.VITE_APP_NAME || 'FiveBucket';
 
 applyTheme(initialTheme());
 

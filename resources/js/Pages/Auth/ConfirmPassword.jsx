@@ -5,6 +5,7 @@ import InputLabel from '@/Components/InputLabel';
 import PrimaryButton from '@/Components/PrimaryButton';
 import TextInput from '@/Components/TextInput';
 import { Head, useForm } from '@inertiajs/react';
+import { ShieldCheck } from 'lucide-react';
 
 export default function ConfirmPassword() {
     const { data, setData, post, processing, errors, reset } = useForm({
@@ -24,15 +25,11 @@ export default function ConfirmPassword() {
     };
 
     return (
-        <GuestLayout>
+        <GuestLayout title="Confirm password" subtitle="This area requires a fresh password confirmation.">
             <Head title="Confirm Password" />
 
-            <div className="mb-4 text-sm text-gray-600">
-                This is a secure area of the application. Please confirm your password before continuing.
-            </div>
-
-            <form onSubmit={submit}>
-                <div className="mt-4">
+            <form onSubmit={submit} className="fb-stack">
+                <div>
                     <InputLabel htmlFor="password" value="Password" />
 
                     <TextInput
@@ -48,8 +45,9 @@ export default function ConfirmPassword() {
                     <InputError message={errors.password} className="mt-2" />
                 </div>
 
-                <div className="flex items-center justify-end mt-4">
-                    <PrimaryButton className="ms-4" disabled={processing}>
+                <div className="flex items-center justify-end">
+                    <PrimaryButton disabled={processing}>
+                        <ShieldCheck className="h-4 w-4" />
                         Confirm
                     </PrimaryButton>
                 </div>

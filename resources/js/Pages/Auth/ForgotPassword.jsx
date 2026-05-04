@@ -2,7 +2,8 @@ import GuestLayout from '@/Layouts/GuestLayout';
 import InputError from '@/Components/InputError';
 import PrimaryButton from '@/Components/PrimaryButton';
 import TextInput from '@/Components/TextInput';
-import { Head, useForm } from '@inertiajs/react';
+import { Head, Link, useForm } from '@inertiajs/react';
+import { Mail } from 'lucide-react';
 
 export default function ForgotPassword({ status }) {
     const { data, setData, post, processing, errors } = useForm({
@@ -16,17 +17,16 @@ export default function ForgotPassword({ status }) {
     };
 
     return (
-        <GuestLayout>
+        <GuestLayout
+            title="Reset your password"
+            subtitle="Enter your account email and FiveBucket will send a reset link."
+            alt={<Link href={route('login')} className="fb-auth-alt">Sign in</Link>}
+        >
             <Head title="Forgot Password" />
 
-            <div className="mb-4 text-sm text-gray-600">
-                Forgot your password? No problem. Just let us know your email address and we will email you a password
-                reset link that will allow you to choose a new one.
-            </div>
+            {status && <div className="fb-alert success mb-4">{status}</div>}
 
-            {status && <div className="mb-4 font-medium text-sm text-green-600">{status}</div>}
-
-            <form onSubmit={submit}>
+            <form onSubmit={submit} className="fb-stack">
                 <TextInput
                     id="email"
                     type="email"
@@ -39,9 +39,10 @@ export default function ForgotPassword({ status }) {
 
                 <InputError message={errors.email} className="mt-2" />
 
-                <div className="flex items-center justify-end mt-4">
-                    <PrimaryButton className="ms-4" disabled={processing}>
-                        Email Password Reset Link
+                <div className="flex items-center justify-end">
+                    <PrimaryButton disabled={processing}>
+                        <Mail className="h-4 w-4" />
+                        Send reset link
                     </PrimaryButton>
                 </div>
             </form>

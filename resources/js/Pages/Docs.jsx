@@ -111,13 +111,13 @@ Content-Type: application/json
 
 export default function Docs({ auth }) {
     return (
-        <div className="min-h-screen bg-slate-50">
+        <div className="min-h-screen bg-[var(--app-bg)] text-[var(--fg)]">
             <Head title="API Docs" />
 
-            <nav className="border-b border-slate-200 bg-white">
+            <nav className="border-b border-[var(--border)] bg-[var(--surface)]">
                 <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
                     <Link href="/">
-                        <ApplicationLogo className="flex items-center gap-2 text-slate-900" />
+                        <ApplicationLogo />
                     </Link>
                     <div className="flex items-center gap-2">
                         <ThemeToggle />
@@ -134,7 +134,7 @@ export default function Docs({ auth }) {
                 <aside className="hidden lg:block">
                     <div className="sticky top-8 space-y-2">
                         {sections.map((section) => (
-                            <a key={section.id} href={`#${section.id}`} className="block rounded-md px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-950">
+                            <a key={section.id} href={`#${section.id}`} className="block rounded-md px-3 py-2 text-[12px] font-medium fb-muted text-decoration-none hover:bg-[var(--surface)] hover:text-[var(--fg)]">
                                 {section.label}
                             </a>
                         ))}
@@ -144,14 +144,14 @@ export default function Docs({ auth }) {
                 <main className="space-y-8">
                     <header>
                         <Badge>Fivemanage compatible</Badge>
-                        <h1 className="mt-4 text-3xl font-semibold text-slate-950">FiveBucket API Docs</h1>
-                        <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
+                        <h1 className="fb-page-title mt-4">FiveBucket API Docs</h1>
+                        <p className="fb-page-subtitle mt-3 max-w-3xl">
                             Routes, request formats, response envelopes, and examples for media hosting, logs, presigned uploads, and SDK endpoints.
                         </p>
                     </header>
 
                     <Section id="auth" icon={KeyRound} title="Authentication">
-                        <p className="text-sm leading-6 text-slate-600">
+                        <p className="text-[12px] leading-6 fb-muted">
                             Every protected API route accepts the API key either as the raw `Authorization` header or as the `apiKey` query parameter.
                         </p>
                         <div className="grid gap-4 md:grid-cols-2">
@@ -196,7 +196,7 @@ export default function Docs({ auth }) {
                     </Section>
 
                     <Section id="errors" title="Responses & Errors">
-                        <p className="text-sm leading-6 text-slate-600">
+                        <p className="text-[12px] leading-6 fb-muted">
                             Successful responses use <code>{"{\"status\": \"ok\"}"}</code>. Failed responses use{' '}
                             <code>{"{\"status\": \"error\"}"}</code> and a human-readable message.
                         </p>
@@ -221,7 +221,7 @@ function Section({ id, icon: Icon, title, children }) {
         <Card id={id} className="scroll-mt-8">
             <CardHeader className="flex flex-row items-center gap-3">
                 {Icon && (
-                    <div className="flex h-9 w-9 items-center justify-center rounded-md bg-slate-950 text-white">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-md bg-[var(--accent)] text-white">
                         <Icon className="h-4 w-4" />
                     </div>
                 )}
@@ -234,11 +234,11 @@ function Section({ id, icon: Icon, title, children }) {
 
 function Endpoint({ method, path, description }) {
     return (
-        <div className="grid gap-3 rounded-md border border-slate-200 px-3 py-3 md:grid-cols-[92px_1fr] md:items-center">
+        <div className="grid gap-3 rounded-md border border-[var(--border)] px-3 py-3 md:grid-cols-[92px_1fr] md:items-center">
             <Badge variant={method === 'GET' ? 'green' : method === 'DELETE' ? 'red' : 'default'}>{method}</Badge>
             <div className="min-w-0">
-                <code className="break-all text-sm font-semibold text-slate-800">{path}</code>
-                <p className="mt-1 text-xs text-slate-500">{description}</p>
+                <code className="break-all text-[12px] font-semibold text-[var(--fg)]">{path}</code>
+                <p className="mt-1 text-[11px] fb-dim">{description}</p>
             </div>
         </div>
     );
@@ -250,10 +250,10 @@ function Grid({ children }) {
 
 function Example({ title, code, language }) {
     return (
-        <div className="overflow-hidden rounded-md border border-slate-200">
-            <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-2">
-                <div className="text-xs font-semibold text-slate-700">{title}</div>
-                <button type="button" className="text-slate-500 hover:text-slate-900" onClick={() => navigator.clipboard?.writeText(code)}>
+        <div className="overflow-hidden rounded-md border border-[var(--border)]">
+            <div className="flex items-center justify-between border-b border-[var(--border)] bg-[var(--bg)] px-3 py-2">
+                <div className="text-[11px] font-semibold fb-muted">{title}</div>
+                <button type="button" className="fb-icon-button" onClick={() => navigator.clipboard?.writeText(code)}>
                     <Copy className="h-4 w-4" />
                 </button>
             </div>
@@ -264,7 +264,7 @@ function Example({ title, code, language }) {
 
 function CodeBlock({ code, language }) {
     return (
-        <pre className="overflow-auto bg-slate-950 p-4 text-xs leading-6 text-slate-100">
+        <pre className="fb-code overflow-auto p-4 text-xs leading-6">
             <code dangerouslySetInnerHTML={{ __html: highlight(code, language) }} />
         </pre>
     );
@@ -272,12 +272,12 @@ function CodeBlock({ code, language }) {
 
 function Status({ code, label, detail }) {
     return (
-        <div className="rounded-md border border-slate-200 p-3">
+        <div className="rounded-md border border-[var(--border)] p-3">
             <div className="flex items-center gap-2">
                 <Badge variant={code.startsWith('2') ? 'green' : code.startsWith('4') ? 'amber' : 'red'}>{code}</Badge>
-                <span className="text-sm font-semibold text-slate-950">{label}</span>
+                <span className="text-[12px] font-semibold text-[var(--fg)]">{label}</span>
             </div>
-            <p className="mt-2 text-xs leading-5 text-slate-500">{detail}</p>
+            <p className="mt-2 text-[11px] leading-5 fb-dim">{detail}</p>
         </div>
     );
 }

@@ -1,143 +1,197 @@
-import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
+import { EmptyState, ExternalButton, KpiCard, PageHeader } from '@/Components/Design';
 import { Badge } from '@/Components/ui/badge';
 import { Button } from '@/Components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/Components/ui/card';
 import { Progress } from '@/Components/ui/progress';
+import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, Link } from '@inertiajs/react';
-import { Boxes, ExternalLink, HardDrive, KeyRound, ScrollText, Settings, UploadCloud } from 'lucide-react';
+import { Boxes, HardDrive, KeyRound, ScrollText, Settings, UploadCloud } from 'lucide-react';
 
 export default function Dashboard({ auth, team, stats, files, logs }) {
+    const activity = [
+        ...files.slice(0, 3).map((file) => ({
+            id: `file-${file.id}`,
+            type: 'media',
+            title: file.filename,
+            detail: `${file.type} · ${file.size}`,
+            time: file.createdAt,
+        })),
+        ...logs.slice(0, 3).map((log, index) => ({
+            id: `log-${index}`,
+            type: 'log',
+            title: log.message || '(empty message)',
+            detail: `${log.level} · ${log.resource ?? 'server'}`,
+            time: log.occurredAt ?? log.createdAt,
+        })),
+    ].slice(0, 5);
+
     return (
         <AuthenticatedLayout user={auth.user}>
             <Head title="Dashboard" />
 
-            <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-                <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
-                    <div>
-                        <p className="text-sm font-medium text-slate-500">{team.slug}</p>
-                        <h1 className="mt-1 text-2xl font-semibold text-slate-950">{team.name}</h1>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="green">{team.plan?.name ?? 'Free'}</Badge>
-                        <Badge>{team.billingStatus}</Badge>
-                    </div>
-                </div>
-
-                <div className="grid gap-4 lg:grid-cols-4">
-                    <Metric icon={HardDrive} label="Storage" value={team.storageUsed} detail={`${team.storageLimit} limit`} />
-                    <Metric icon={Boxes} label="Media" value={String(stats.totalMedia)} detail={`${stats.images} images, ${stats.videos} videos`} />
-                    <Metric icon={KeyRound} label="API keys" value={String(stats.activeApiKeys)} detail="active keys" />
-                    <Metric icon={ScrollText} label="Logs 24h" value={String(stats.logs24h)} detail={`${stats.logsTotal} total logs`} />
-                </div>
-
-                <Card>
-                    <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                        <CardTitle>Storage Usage</CardTitle>
-                        <div className="flex gap-2">
+            <div className="fb-page">
+                <PageHeader
+                    eyebrow={team.slug}
+                    title={team.name}
+                    description="Overview of your FiveM hosting surface: storage, media, API keys, logs, and delivery configuration."
+                    actions={
+                        <>
+                            <Badge variant="green">{team.plan?.name ?? 'Free'}</Badge>
+                            <Badge>{team.billingStatus}</Badge>
                             <Button asChild variant="secondary" size="sm">
                                 <Link href={route('media.index')}>
-                                    <UploadCloud className="h-4 w-4" />
-                                    Manage media
+                                    <UploadCloud className="h-3.5 w-3.5" />
+                                    Upload
                                 </Link>
                             </Button>
-                            <Button asChild variant="secondary" size="sm">
-                                <Link href={route('settings.index')}>
-                                    <Settings className="h-4 w-4" />
-                                    Public URL
-                                </Link>
-                            </Button>
-                        </div>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="flex items-center justify-between text-sm">
-                            <span className="font-medium text-slate-700">{team.storageUsed}</span>
-                            <span className="text-slate-500">{team.storagePercent}%</span>
-                        </div>
-                        <Progress value={team.storagePercent} className="mt-3" />
-                        <div className="mt-3 break-all text-xs text-slate-500">
-                            Public base URL: {team.publicBaseUrl ?? 'fallback application storage URL'}
-                        </div>
-                    </CardContent>
-                </Card>
+                        </>
+                    }
+                />
 
-                <div className="grid gap-6 xl:grid-cols-2">
-                    <Panel title="Recent Media" action={<Link href={route('media.index')}>View all</Link>}>
-                        {files.length === 0 ? (
-                            <Empty>No uploads yet.</Empty>
-                        ) : (
-                            files.map((file) => (
-                                <div key={file.id} className="grid grid-cols-[1fr_auto] gap-3 border-b border-slate-100 py-3 last:border-0">
-                                    <div className="min-w-0">
-                                        <div className="truncate text-sm font-medium text-slate-900">{file.filename}</div>
-                                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                                            <Badge>{file.type}</Badge>
-                                            <span>{file.size}</span>
-                                            <span>{file.createdAt}</span>
+                <div className="fb-kpis">
+                    <KpiCard icon={HardDrive} label="Storage" value={team.storageUsed} detail={`${team.storageLimit} limit · ${team.storagePercent}% used`} />
+                    <KpiCard icon={Boxes} label="Media" value={stats.totalMedia} detail={`${stats.images} images · ${stats.videos} videos`} />
+                    <KpiCard icon={KeyRound} label="API keys" value={stats.activeApiKeys} detail="active credentials" tone="muted" />
+                    <KpiCard icon={ScrollText} label="Logs 24h" value={stats.logs24h} detail={`${stats.logsTotal} total logs`} />
+                </div>
+
+                <div className="fb-grid" style={{ gridTemplateColumns: 'minmax(0, 1.45fr) minmax(320px, 0.8fr)', marginBottom: 12 }}>
+                    <Card>
+                        <CardHeader>
+                            <div>
+                                <CardTitle>Storage Usage</CardTitle>
+                                <p className="fb-panel-subtitle">Current workspace quota and public delivery endpoint.</p>
+                            </div>
+                            <div className="fb-page-actions">
+                                <Button asChild variant="secondary" size="sm">
+                                    <Link href={route('media.index')}>
+                                        <UploadCloud className="h-3.5 w-3.5" />
+                                        Manage media
+                                    </Link>
+                                </Button>
+                                <Button asChild variant="ghost" size="sm">
+                                    <Link href={route('settings.index')}>
+                                        <Settings className="h-3.5 w-3.5" />
+                                        URL override
+                                    </Link>
+                                </Button>
+                            </div>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="flex items-center justify-between">
+                                <span className="fb-mono text-[22px] font-semibold">{team.storageUsed}</span>
+                                <span className="fb-badge">{team.storagePercent}%</span>
+                            </div>
+                            <Progress value={team.storagePercent} className="mt-3" />
+                            <div className="mt-3 fb-break fb-mono text-[11px] fb-muted">
+                                {team.publicBaseUrl ?? 'Using fallback application storage URL'}
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Recent Activity</CardTitle>
+                            <Button asChild variant="ghost" size="sm">
+                                <Link href={route('logs.index')}>View all</Link>
+                            </Button>
+                        </CardHeader>
+                        <CardContent className="fb-stack">
+                            {activity.length === 0 ? (
+                                <EmptyState compact>No activity yet.</EmptyState>
+                            ) : (
+                                activity.map((item) => (
+                                    <div key={item.id} className="grid grid-cols-[24px_1fr_auto] items-center gap-3 rounded-md px-2 py-2 hover:bg-[var(--bg-hover)]">
+                                        <div className={`fb-status-pill ${item.type === 'log' ? 'warn' : 'active'}`} />
+                                        <div className="min-w-0">
+                                            <div className="truncate text-[12px] font-medium text-[var(--fg)]">{item.title}</div>
+                                            <div className="truncate fb-mono text-[10px] fb-dim">{item.detail}</div>
                                         </div>
+                                        <div className="fb-mono text-[10px] fb-dim">{item.time}</div>
                                     </div>
-                                    <Button asChild variant="ghost" size="icon">
-                                        <a href={file.url} target="_blank" rel="noreferrer">
-                                            <ExternalLink className="h-4 w-4" />
-                                        </a>
-                                    </Button>
-                                </div>
-                            ))
-                        )}
-                    </Panel>
+                                ))
+                            )}
+                        </CardContent>
+                    </Card>
+                </div>
 
-                    <Panel title="Recent Logs" action={<Link href={route('logs.index')}>View all</Link>}>
-                        {logs.length === 0 ? (
-                            <Empty>No logs yet.</Empty>
-                        ) : (
-                            logs.map((log, index) => (
-                                <div key={`${log.createdAt}-${index}`} className="border-b border-slate-100 py-3 last:border-0">
-                                    <div className="flex items-center gap-2">
-                                        <Badge variant={log.level === 'error' || log.level === 'fatal' ? 'red' : log.level === 'warn' || log.level === 'warning' ? 'amber' : 'default'}>
-                                            {log.level}
-                                        </Badge>
-                                        <span className="text-xs text-slate-500">{log.resource ?? 'server'}</span>
-                                        <span className="text-xs text-slate-400">{log.occurredAt ?? log.createdAt}</span>
-                                    </div>
-                                    <p className="mt-2 text-sm text-slate-700">{log.message}</p>
+                <div className="fb-grid cols-2">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Recent Media</CardTitle>
+                            <Button asChild variant="ghost" size="sm">
+                                <Link href={route('media.index')}>View library</Link>
+                            </Button>
+                        </CardHeader>
+                        <CardContent>
+                            {files.length === 0 ? (
+                                <EmptyState>No uploads yet.</EmptyState>
+                            ) : (
+                                <div className="fb-table-wrap">
+                                    <table className="fb-table">
+                                        <thead>
+                                            <tr>
+                                                <th>File</th>
+                                                <th>Type</th>
+                                                <th>Size</th>
+                                                <th />
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {files.map((file) => (
+                                                <tr key={file.id}>
+                                                    <td>
+                                                        <div className="font-medium text-[var(--fg)]">{file.filename}</div>
+                                                        <div className="fb-mono text-[10px] fb-dim">{file.createdAt}</div>
+                                                    </td>
+                                                    <td><Badge>{file.type}</Badge></td>
+                                                    <td className="fb-mono">{file.size}</td>
+                                                    <td><ExternalButton href={file.url} label="Open" /></td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
                                 </div>
-                            ))
-                        )}
-                    </Panel>
+                            )}
+                        </CardContent>
+                    </Card>
+
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Recent Logs</CardTitle>
+                            <Button asChild variant="ghost" size="sm">
+                                <Link href={route('logs.index')}>Inspect logs</Link>
+                            </Button>
+                        </CardHeader>
+                        <CardContent>
+                            {logs.length === 0 ? (
+                                <EmptyState>No logs yet.</EmptyState>
+                            ) : (
+                                <div className="fb-table-wrap">
+                                    {logs.map((log, index) => (
+                                        <div key={`${log.createdAt}-${index}`} className="fb-log-row">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <Badge variant={levelVariant(log.level)}>{log.level}</Badge>
+                                                <span className="fb-mono text-[10px] fb-dim">{log.resource ?? 'server'}</span>
+                                                <span className="fb-mono text-[10px] fb-dim">{log.occurredAt ?? log.createdAt}</span>
+                                            </div>
+                                            <p className="mt-2 text-[12px] fb-muted">{log.message || '(empty message)'}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
                 </div>
             </div>
         </AuthenticatedLayout>
     );
 }
 
-function Metric({ icon: Icon, label, value, detail }) {
-    return (
-        <Card>
-            <CardContent className="flex items-center gap-4">
-                <div className="flex h-10 w-10 items-center justify-center rounded-md bg-slate-950 text-white">
-                    <Icon className="h-5 w-5" />
-                </div>
-                <div>
-                    <div className="text-sm text-slate-500">{label}</div>
-                    <div className="text-xl font-semibold text-slate-950">{value}</div>
-                    <div className="text-xs text-slate-400">{detail}</div>
-                </div>
-            </CardContent>
-        </Card>
-    );
-}
+function levelVariant(level) {
+    if (level === 'error' || level === 'fatal') return 'red';
+    if (level === 'warn' || level === 'warning') return 'amber';
+    if (level === 'info') return 'green';
 
-function Panel({ title, action, children }) {
-    return (
-        <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle>{title}</CardTitle>
-                {action && <div className="text-sm font-medium text-slate-700">{action}</div>}
-            </CardHeader>
-            <CardContent>{children}</CardContent>
-        </Card>
-    );
-}
-
-function Empty({ children }) {
-    return <div className="py-8 text-center text-sm text-slate-500">{children}</div>;
+    return 'default';
 }

@@ -1,10 +1,13 @@
-import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
+import { CopyButton, EmptyState, Field, KpiCard, PageHeader } from '@/Components/Design';
 import { Badge } from '@/Components/ui/badge';
 import { Button } from '@/Components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/Components/ui/card';
+import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, Link, useForm, usePage } from '@inertiajs/react';
-import { Copy, Eye, EyeOff, KeyRound, Trash2 } from 'lucide-react';
+import { Copy, Eye, EyeOff, KeyRound, LockKeyhole, Route, ShieldCheck, Trash2 } from 'lucide-react';
 import { useState } from 'react';
+
+const scopes = ['media', 'logs', 'sdk'];
 
 export default function ApiKeysIndex({ auth, team, apiBase, tokens, endpoints }) {
     const { flash } = usePage().props;
@@ -80,55 +83,66 @@ export default function ApiKeysIndex({ auth, team, apiBase, tokens, endpoints })
         <AuthenticatedLayout user={auth.user}>
             <Head title="API Keys" />
 
-            <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-                <Header title="API Keys" eyebrow={team.slug} description="Manage server credentials used by FiveM resources and NUI uploads." />
+            <div className="fb-page">
+                <PageHeader
+                    eyebrow={team.slug}
+                    title="API Keys"
+                    description="Credentials for FiveM resources, media uploads, logs ingestion, and SDK sessions."
+                    actions={<Badge>{apiBase}</Badge>}
+                />
+
+                <div className="fb-kpis">
+                    <KpiCard icon={KeyRound} label="Active keys" value={tokens.filter((token) => token.isActive).length} detail={`${tokens.length} total credentials`} />
+                    <KpiCard icon={ShieldCheck} label="Scopes" value={scopes.length} detail="media · logs · sdk" />
+                    <KpiCard icon={Route} label="Endpoints" value={endpoints.length} detail="compatibility routes" tone="muted" />
+                    <KpiCard icon={LockKeyhole} label="Reveal" value="Encrypted" detail="new keys can be viewed later" />
+                </div>
 
                 {flash.apiToken && (
-                    <Card className="border-emerald-200 bg-emerald-50">
-                        <CardContent className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div className="fb-alert success mb-3">
+                        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                             <div className="min-w-0">
-                                <div className="text-sm font-semibold text-emerald-950">New API key</div>
-                                <code className="mt-1 block break-all rounded-md bg-white px-3 py-2 text-xs text-emerald-950 ring-1 ring-emerald-200">
-                                    {flash.apiToken}
-                                </code>
+                                <div className="text-[12px] font-semibold text-[var(--fg)]">New API key</div>
+                                <code className="fb-inline-code mt-2 block fb-break">{flash.apiToken}</code>
                             </div>
-                            <Button type="button" variant="secondary" onClick={() => navigator.clipboard?.writeText(flash.apiToken)}>
-                                <Copy className="h-4 w-4" />
-                                Copy
-                            </Button>
-                        </CardContent>
-                    </Card>
+                            <CopyButton value={flash.apiToken} />
+                        </div>
+                    </div>
                 )}
 
-                <div className="grid gap-6 xl:grid-cols-[420px_1fr]">
+                <div className="fb-grid" style={{ gridTemplateColumns: '420px minmax(0, 1fr)', marginBottom: 12 }}>
                     <Card>
                         <CardHeader>
                             <CardTitle>Create Key</CardTitle>
                         </CardHeader>
                         <CardContent>
-                            <form onSubmit={createToken} className="space-y-4">
-                                <label className="block text-sm font-medium text-slate-700">
-                                    Name
+                            <form onSubmit={createToken} className="fb-form-grid">
+                                <Field label="Name" error={form.errors.name}>
                                     <input
-                                        className="mt-1 block h-10 w-full rounded-md border-slate-300 text-sm shadow-sm focus:border-slate-500 focus:ring-slate-500"
+                                        className="fb-input"
                                         value={form.data.name}
                                         onChange={(event) => form.setData('name', event.target.value)}
                                     />
-                                </label>
-                                <div className="grid grid-cols-3 gap-2">
-                                    {['media', 'logs', 'sdk'].map((scope) => (
-                                        <label key={scope} className="flex h-10 items-center justify-center gap-2 rounded-md border border-slate-200 text-sm text-slate-700">
-                                            <input
-                                                type="checkbox"
-                                                checked={form.data.scopes.includes(scope)}
-                                                onChange={() => toggleScope(scope)}
-                                                className="rounded border-slate-300 text-slate-950 focus:ring-slate-500"
-                                            />
-                                            {scope}
-                                        </label>
-                                    ))}
+                                </Field>
+
+                                <div>
+                                    <div className="fb-label mb-2">Scopes</div>
+                                    <div className="fb-grid cols-3">
+                                        {scopes.map((scope) => (
+                                            <label key={scope} className={`fb-button ${form.data.scopes.includes(scope) ? 'primary' : ''}`}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={form.data.scopes.includes(scope)}
+                                                    onChange={() => toggleScope(scope)}
+                                                    className="sr-only"
+                                                />
+                                                {scope}
+                                            </label>
+                                        ))}
+                                    </div>
                                 </div>
-                                <Button type="submit" disabled={form.processing} className="w-full">
+
+                                <Button type="submit" disabled={form.processing}>
                                     <KeyRound className="h-4 w-4" />
                                     Create Key
                                 </Button>
@@ -138,16 +152,30 @@ export default function ApiKeysIndex({ auth, team, apiBase, tokens, endpoints })
 
                     <Card>
                         <CardHeader>
-                            <CardTitle>Compatibility API</CardTitle>
-                            <code className="mt-2 block break-all text-xs text-slate-500">{apiBase}</code>
+                            <div>
+                                <CardTitle>Compatibility API</CardTitle>
+                                <p className="fb-panel-subtitle fb-break">{apiBase}</p>
+                            </div>
                         </CardHeader>
-                        <CardContent className="grid gap-3 md:grid-cols-2">
-                            {endpoints.map((endpoint) => (
-                                <div key={`${endpoint.method}-${endpoint.path}`} className="flex items-center gap-3 rounded-md border border-slate-200 px-3 py-2">
-                                    <Badge variant={endpoint.method === 'GET' ? 'green' : 'default'}>{endpoint.method}</Badge>
-                                    <code className="text-xs text-slate-600">{endpoint.path}</code>
-                                </div>
-                            ))}
+                        <CardContent>
+                            <div className="fb-table-wrap">
+                                <table className="fb-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Method</th>
+                                            <th>Path</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {endpoints.map((endpoint) => (
+                                            <tr key={`${endpoint.method}-${endpoint.path}`}>
+                                                <td><Badge variant={endpoint.method === 'GET' ? 'green' : endpoint.method === 'DELETE' ? 'red' : 'default'}>{endpoint.method}</Badge></td>
+                                                <td><code className="fb-mono text-[11px] fb-muted">{endpoint.path}</code></td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
                         </CardContent>
                     </Card>
                 </div>
@@ -155,73 +183,83 @@ export default function ApiKeysIndex({ auth, team, apiBase, tokens, endpoints })
                 <Card>
                     <CardHeader>
                         <CardTitle>Existing Keys</CardTitle>
+                        <Badge>{tokens.length} total</Badge>
                     </CardHeader>
-                    <CardContent className="divide-y divide-slate-100">
+                    <CardContent>
                         {tokens.length === 0 ? (
-                            <Empty>No API keys yet.</Empty>
+                            <EmptyState>No API keys yet.</EmptyState>
                         ) : (
-                            tokens.map((token) => (
-                                <div key={token.id} className="grid gap-3 py-4 md:grid-cols-[1fr_auto] md:items-start">
-                                    <div className="min-w-0">
-                                        <div className="flex flex-wrap items-center gap-2">
-                                            <div className="font-medium text-slate-950">{token.name}</div>
-                                            <Badge variant={token.isActive ? 'green' : 'red'}>{token.isActive ? 'active' : 'revoked'}</Badge>
-                                            {!token.canReveal && token.isActive && <Badge variant="amber">legacy</Badge>}
-                                        </div>
-                                        <div className="mt-1 text-xs text-slate-500">{token.prefix}... · {token.scopes.join(', ')} · created {token.createdAt}</div>
-                                        {revealed[token.id]?.token && (
-                                            <code className="mt-3 block break-all rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-700 ring-1 ring-slate-200">
-                                                {revealed[token.id].token}
-                                            </code>
-                                        )}
-                                        {revealed[token.id]?.message && (
-                                            <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                                                {revealed[token.id].message}
-                                            </div>
-                                        )}
-                                    </div>
-                                    <div className="flex flex-wrap justify-start gap-2 md:justify-end">
-                                        {token.isActive && (
-                                            <Button type="button" variant="secondary" size="sm" onClick={() => revealToken(token)} disabled={loading[token.id]}>
-                                                {revealed[token.id]?.token ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                                                {revealed[token.id]?.token ? 'Hide' : 'View'}
-                                            </Button>
-                                        )}
-                                        {revealed[token.id]?.token && (
-                                            <Button type="button" variant="secondary" size="sm" onClick={() => navigator.clipboard?.writeText(revealed[token.id].token)}>
-                                                <Copy className="h-4 w-4" />
-                                                Copy
-                                            </Button>
-                                        )}
-                                        {token.isActive && (
-                                            <Button asChild variant="destructive" size="sm">
-                                                <Link href={route('api-tokens.destroy', token.id)} method="delete" as="button" preserveScroll>
-                                                    <Trash2 className="h-4 w-4" />
-                                                    Revoke
-                                                </Link>
-                                            </Button>
-                                        )}
-                                    </div>
-                                </div>
-                            ))
+                            <div className="fb-table-wrap">
+                                <table className="fb-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>Prefix</th>
+                                            <th>Scopes</th>
+                                            <th>Last used</th>
+                                            <th>Status</th>
+                                            <th />
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {tokens.map((token) => (
+                                            <tr key={token.id}>
+                                                <td>
+                                                    <div className="font-medium text-[var(--fg)]">{token.name}</div>
+                                                    <div className="fb-mono text-[10px] fb-dim">created {token.createdAt}</div>
+                                                    {revealed[token.id]?.token && (
+                                                        <code className="fb-inline-code mt-2 block fb-break">{revealed[token.id].token}</code>
+                                                    )}
+                                                    {revealed[token.id]?.message && (
+                                                        <div className="fb-alert warning mt-2 text-[11px]">{revealed[token.id].message}</div>
+                                                    )}
+                                                </td>
+                                                <td><code className="fb-inline-code">{token.prefix}...</code></td>
+                                                <td>
+                                                    <div className="flex flex-wrap gap-1">
+                                                        {token.scopes.map((scope) => <Badge key={scope}>{scope}</Badge>)}
+                                                    </div>
+                                                </td>
+                                                <td className="fb-mono">{token.lastUsedAt ?? 'never'}</td>
+                                                <td>
+                                                    <div className="flex flex-wrap gap-1">
+                                                        <Badge variant={token.isActive ? 'green' : 'red'}>{token.isActive ? 'active' : 'revoked'}</Badge>
+                                                        {!token.canReveal && token.isActive && <Badge variant="amber">legacy</Badge>}
+                                                    </div>
+                                                </td>
+                                                <td>
+                                                    <div className="flex justify-end gap-2">
+                                                        {token.isActive && (
+                                                            <Button type="button" variant="secondary" size="sm" onClick={() => revealToken(token)} disabled={loading[token.id]}>
+                                                                {revealed[token.id]?.token ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                                                                {revealed[token.id]?.token ? 'Hide' : 'View'}
+                                                            </Button>
+                                                        )}
+                                                        {revealed[token.id]?.token && (
+                                                            <Button type="button" variant="secondary" size="sm" onClick={() => navigator.clipboard?.writeText(revealed[token.id].token)}>
+                                                                <Copy className="h-3.5 w-3.5" />
+                                                                Copy
+                                                            </Button>
+                                                        )}
+                                                        {token.isActive && (
+                                                            <Button asChild variant="destructive" size="sm">
+                                                                <Link href={route('api-tokens.destroy', token.id)} method="delete" as="button" preserveScroll>
+                                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                                    Revoke
+                                                                </Link>
+                                                            </Button>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
                         )}
                     </CardContent>
                 </Card>
             </div>
         </AuthenticatedLayout>
     );
-}
-
-function Header({ title, eyebrow, description }) {
-    return (
-        <div>
-            <p className="text-sm font-medium text-slate-500">{eyebrow}</p>
-            <h1 className="mt-1 text-2xl font-semibold text-slate-950">{title}</h1>
-            <p className="mt-2 text-sm text-slate-600">{description}</p>
-        </div>
-    );
-}
-
-function Empty({ children }) {
-    return <div className="py-8 text-center text-sm text-slate-500">{children}</div>;
 }

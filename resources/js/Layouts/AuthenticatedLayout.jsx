@@ -1,126 +1,178 @@
-import { useState } from 'react';
 import ApplicationLogo from '@/Components/ApplicationLogo';
-import Dropdown from '@/Components/Dropdown';
-import NavLink from '@/Components/NavLink';
-import ResponsiveNavLink from '@/Components/ResponsiveNavLink';
 import ThemeToggle from '@/Components/ThemeToggle';
-import { Link } from '@inertiajs/react';
-import { BookOpen, Boxes, ChevronDown, KeyRound, LayoutDashboard, Menu, ScrollText, Settings, Shield, X } from 'lucide-react';
+import { Link, usePage } from '@inertiajs/react';
+import {
+    BookOpen,
+    Boxes,
+    ChevronDown,
+    KeyRound,
+    LayoutDashboard,
+    LogOut,
+    Menu,
+    Search,
+    ScrollText,
+    Settings,
+    Shield,
+    User,
+    X,
+} from 'lucide-react';
+import { useState } from 'react';
 
-export default function Authenticated({ user, header, children }) {
-    const [showingNavigationDropdown, setShowingNavigationDropdown] = useState(false);
-    const navItems = [
-        { label: 'Dashboard', href: route('dashboard'), active: route().current('dashboard'), icon: LayoutDashboard },
-        { label: 'API Keys', href: route('api-keys.index'), active: route().current('api-keys.*'), icon: KeyRound },
-        { label: 'Media', href: route('media.index'), active: route().current('media.*'), icon: Boxes },
-        { label: 'Logs', href: route('logs.index'), active: route().current('logs.*'), icon: ScrollText },
-        { label: 'Docs', href: route('docs'), active: route().current('docs'), icon: BookOpen },
-        { label: 'Settings', href: route('settings.index'), active: route().current('settings.*'), icon: Settings },
-    ];
+const baseNavigation = [
+    {
+        title: null,
+        items: [
+            { label: 'Dashboard', href: () => route('dashboard'), active: () => route().current('dashboard'), icon: LayoutDashboard },
+            { label: 'Logs', href: () => route('logs.index'), active: () => route().current('logs.*'), icon: ScrollText, trail: 'L' },
+            { label: 'Media', href: () => route('media.index'), active: () => route().current('media.*'), icon: Boxes },
+            { label: 'API Keys', href: () => route('api-keys.index'), active: () => route().current('api-keys.*'), icon: KeyRound },
+        ],
+    },
+    {
+        title: 'Resource',
+        items: [
+            { label: 'Documentation', href: () => route('docs'), active: () => route().current('docs'), icon: BookOpen },
+            { label: 'Settings', href: () => route('settings.index'), active: () => route().current('settings.*'), icon: Settings },
+        ],
+    },
+];
 
-    if (user.isAdmin) {
-        navItems.push({
+export default function Authenticated({ user, children }) {
+    const [mobileOpen, setMobileOpen] = useState(false);
+    const { team } = usePage().props;
+
+    const navigation = baseNavigation.map((section) => ({
+        ...section,
+        items: [...section.items],
+    }));
+
+    if (user?.isAdmin) {
+        navigation[1].items.push({
             label: 'Admin',
-            href: route('admin.accounts.index'),
-            active: route().current('admin.*'),
+            href: () => route('admin.accounts.index'),
+            active: () => route().current('admin.*'),
             icon: Shield,
         });
     }
 
+    const activeItem = navigation
+        .flatMap((section) => section.items)
+        .find((item) => item.active());
+    const initials = initialsFor(user?.name || user?.email || 'FB');
+
     return (
-        <div className="min-h-screen bg-slate-50">
-            <nav className="border-b border-slate-200 bg-white">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex justify-between h-16">
-                        <div className="flex">
-                            <div className="shrink-0 flex items-center">
-                                <Link href="/">
-                                    <ApplicationLogo className="flex items-center gap-2 text-slate-900" />
-                                </Link>
-                            </div>
+        <div className="fb-shell">
+            <aside className="fb-sidebar">
+                <Link href={route('dashboard')} className="fb-brand">
+                    <ApplicationLogo />
+                    <span className="fb-brand-badge">v1</span>
+                </Link>
 
-                            <div className="hidden space-x-7 sm:-my-px sm:ms-10 sm:flex">
-                                {navItems.map((item) => (
-                                    <NavLink key={item.label} href={item.href} active={item.active}>
-                                        <span className="inline-flex items-center gap-2">
-                                            <item.icon className="h-4 w-4" />
-                                            {item.label}
-                                        </span>
-                                    </NavLink>
-                                ))}
-                            </div>
-                        </div>
+                <NavigationSections sections={navigation} />
 
-                        <div className="hidden sm:flex sm:items-center sm:ms-6">
-                            <ThemeToggle />
-                            <div className="ms-3 relative">
-                                <Dropdown>
-                                    <Dropdown.Trigger>
-                                        <span className="inline-flex rounded-md">
-                                            <button
-                                                type="button"
-                                                className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium leading-4 text-slate-600 transition hover:bg-slate-50 hover:text-slate-900 focus:outline-none"
-                                            >
-                                                {user.name}
-                                                <ChevronDown className="h-4 w-4" />
-                                            </button>
-                                        </span>
-                                    </Dropdown.Trigger>
+                <Link href={route('settings.index')} className="fb-org-switcher">
+                    <div className="fb-org-avatar">{initialsFor(team?.name || user?.name || 'FB')}</div>
+                    <div className="fb-org-meta">
+                        <div className="fb-org-name">{team?.name || user?.name}</div>
+                        <div className="fb-org-plan">{team?.plan?.name || 'workspace'} · {team?.slug || 'fivebucket'}</div>
+                    </div>
+                    <ChevronDown className="h-3.5 w-3.5 fb-dim" />
+                </Link>
+            </aside>
 
-                                    <Dropdown.Content>
-                                        <Dropdown.Link href={route('profile.edit')}>Profile</Dropdown.Link>
-                                        <Dropdown.Link href={route('logout')} method="post" as="button">
-                                            Log Out
-                                        </Dropdown.Link>
-                                    </Dropdown.Content>
-                                </Dropdown>
-                            </div>
-                        </div>
-
-                        <div className="-me-2 flex items-center gap-2 sm:hidden">
-                            <ThemeToggle />
-                            <button
-                                onClick={() => setShowingNavigationDropdown((previousState) => !previousState)}
-                                className="inline-flex items-center justify-center rounded-md p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none"
-                            >
-                                {showingNavigationDropdown ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-                            </button>
-                        </div>
+            <main className="fb-main">
+                <div className="fb-mobilebar">
+                    <Link href={route('dashboard')} className="flex items-center gap-2 text-decoration-none">
+                        <ApplicationLogo />
+                    </Link>
+                    <div className="flex items-center gap-2">
+                        <ThemeToggle />
+                        <button type="button" className="fb-button icon" onClick={() => setMobileOpen((value) => !value)}>
+                            {mobileOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+                        </button>
                     </div>
                 </div>
 
-                <div className={(showingNavigationDropdown ? 'block' : 'hidden') + ' sm:hidden'}>
-                    <div className="pt-2 pb-3 space-y-1">
-                        {navItems.map((item) => (
-                            <ResponsiveNavLink key={item.label} href={item.href} active={item.active}>
-                                {item.label}
-                            </ResponsiveNavLink>
-                        ))}
-                    </div>
-
-                    <div className="pt-4 pb-1 border-t border-slate-200">
-                        <div className="px-4">
-                            <div className="font-medium text-base text-slate-900">{user.name}</div>
-                            <div className="font-medium text-sm text-slate-500">{user.email}</div>
-                        </div>
-
-                        <div className="mt-3 space-y-1">
-                            <ResponsiveNavLink href={route('profile.edit')}>Profile</ResponsiveNavLink>
-                            <ResponsiveNavLink method="post" href={route('logout')} as="button">
-                                Log Out
-                            </ResponsiveNavLink>
+                {mobileOpen && (
+                    <div className="fb-mobile-nav">
+                        <NavigationSections sections={navigation} onNavigate={() => setMobileOpen(false)} />
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                            <Link href={route('profile.edit')} className="fb-button ghost sm">
+                                <User className="h-3.5 w-3.5" />
+                                Profile
+                            </Link>
+                            <Link href={route('logout')} method="post" as="button" className="fb-button ghost sm">
+                                <LogOut className="h-3.5 w-3.5" />
+                                Log out
+                            </Link>
                         </div>
                     </div>
+                )}
+
+                <div className="fb-topbar">
+                    <div className="fb-crumbs">
+                        <span className="fb-crumb-server">{team?.slug || 'fivebucket'}</span>
+                        <span className="fb-crumb-sep">/</span>
+                        <span className="fb-crumb-current">{activeItem?.label || 'Dashboard'}</span>
+                    </div>
+
+                    <div className="fb-topbar-spacer" />
+
+                    <button type="button" className="fb-search">
+                        <Search className="h-3.5 w-3.5" />
+                        <span>Search logs, assets, keys...</span>
+                        <span className="fb-kbd">/</span>
+                    </button>
+
+                    <ThemeToggle />
+
+                    <Link href={route('profile.edit')} className="fb-user-chip">
+                        <span className="fb-avatar">{initials}</span>
+                        <span>{user?.name}</span>
+                        <ChevronDown className="h-3 w-3 fb-dim" />
+                    </Link>
+
+                    <Link href={route('logout')} method="post" as="button" className="fb-button ghost icon" title="Log out">
+                        <LogOut className="h-4 w-4" />
+                    </Link>
                 </div>
-            </nav>
 
-            {header && (
-                <header className="border-b border-slate-200 bg-white">
-                    <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">{header}</div>
-                </header>
-            )}
-
-            <main>{children}</main>
+                <div className="fb-content">{children}</div>
+            </main>
         </div>
     );
+}
+
+function NavigationSections({ sections, onNavigate }) {
+    return sections.map((section, index) => (
+        <div key={section.title || index}>
+            {section.title && <div className="fb-nav-section-title">{section.title}</div>}
+            {section.items.map((item) => {
+                const Icon = item.icon;
+                const active = item.active();
+
+                return (
+                    <Link
+                        key={item.label}
+                        href={item.href()}
+                        onClick={onNavigate}
+                        className={`fb-nav-item ${active ? 'active' : ''}`}
+                    >
+                        <Icon className="fb-nav-icon" />
+                        <span>{item.label}</span>
+                        {item.trail && <span className="fb-nav-trail">{item.trail}</span>}
+                    </Link>
+                );
+            })}
+        </div>
+    ));
+}
+
+function initialsFor(value) {
+    return String(value || 'FB')
+        .split(/\s|-/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((part) => part[0]?.toUpperCase())
+        .join('') || 'FB';
 }

@@ -14,7 +14,7 @@ export default function ThemeToggle({ className = '' }) {
     return (
         <Button
             type="button"
-            variant="secondary"
+            variant="ghost"
             size="icon"
             className={className}
             aria-label={isDark ? 'Switch to light theme' : 'Switch to dark theme'}

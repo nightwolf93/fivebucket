@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Events\MediaChanged;
 use App\Models\ApiToken;
 use App\Models\MediaFile;
 use App\Models\Team;
@@ -11,6 +12,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpKernel\Exception\HttpException;
+use Throwable;
 
 class FiveBucketStorage
 {
@@ -22,7 +24,10 @@ class FiveBucketStorage
         $extension = $this->extensionFor($filename, $mime);
         $contents = fopen($file->getRealPath(), 'rb');
 
-        return $this->persist($team, $apiToken, $contents, $size, $filename, $mime, $extension, $options);
+        $mediaFile = $this->persist($team, $apiToken, $contents, $size, $filename, $mime, $extension, $options);
+        $this->broadcastMediaEvent(MediaChanged::created($mediaFile, $team));
+
+        return $mediaFile;
     }
 
     public function storeBase64(Team $team, ?ApiToken $apiToken, string $base64, array $options = []): MediaFile
@@ -45,7 +50,10 @@ class FiveBucketStorage
         $filename = $this->sanitizeFilename($options['filename'] ?? 'upload.'.$this->extensionFromMime($mime));
         $extension = $this->extensionFor($filename, $mime);
 
-        return $this->persist($team, $apiToken, $contents, strlen($contents), $filename, $mime, $extension, $options);
+        $mediaFile = $this->persist($team, $apiToken, $contents, strlen($contents), $filename, $mime, $extension, $options);
+        $this->broadcastMediaEvent(MediaChanged::created($mediaFile, $team));
+
+        return $mediaFile;
     }
 
     public function findForTeam(Team $team, string $path): ?MediaFile
@@ -61,11 +69,11 @@ class FiveBucketStorage
 
     public function delete(MediaFile $file): void
     {
-        DB::transaction(function () use ($file): void {
+        $deletedFile = DB::transaction(function () use ($file): ?MediaFile {
             $lockedFile = MediaFile::query()->whereKey($file->id)->lockForUpdate()->firstOrFail();
 
             if ($lockedFile->trashed()) {
-                return;
+                return null;
             }
 
             Storage::disk($this->disk())->delete($lockedFile->storage_key);
@@ -82,7 +90,13 @@ class FiveBucketStorage
                 'subject_type' => MediaFile::class,
                 'subject_id' => $lockedFile->id,
             ]);
+
+            return $lockedFile;
         });
+
+        if ($deletedFile) {
+            $this->broadcastMediaEvent(MediaChanged::deleted($deletedFile));
+        }
     }
 
     public function createPresignedUrl(Team $team, ?ApiToken $apiToken, ?int $expiresAt = null, ?string $fileType = null, string $path = '/api/v3/file/presigned-url'): string
@@ -303,5 +317,14 @@ class FiveBucketStorage
     private function base64UrlDecode(string $value): string
     {
         return base64_decode(strtr($value, '-_', '+/').str_repeat('=', (4 - strlen($value) % 4) % 4));
+    }
+
+    private function broadcastMediaEvent(MediaChanged $event): void
+    {
+        try {
+            event($event);
+        } catch (Throwable $exception) {
+            report($exception);
+        }
     }
 }

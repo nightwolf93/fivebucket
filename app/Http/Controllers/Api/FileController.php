@@ -68,7 +68,7 @@ class FileController extends Controller
                 $this->uploadOptions($request)
             );
 
-            return $this->ok(['data' => $this->uploadPayload($mediaFile)]);
+            return $this->ok($this->uploadResponsePayload($mediaFile));
         });
     }
 
@@ -86,7 +86,7 @@ class FileController extends Controller
                 $this->uploadOptions($request)
             );
 
-            return $this->ok(['data' => $this->uploadPayload($mediaFile)]);
+            return $this->ok($this->uploadResponsePayload($mediaFile));
         });
     }
 
@@ -134,7 +134,7 @@ class FileController extends Controller
 
             $mediaFile = $this->storage->storeUploadedFile($team, $apiToken, $file, $this->uploadOptions($request));
 
-            return $this->ok(['data' => $this->uploadPayload($mediaFile)]);
+            return $this->ok($this->uploadResponsePayload($mediaFile));
         });
     }
 
@@ -202,6 +202,21 @@ class FileController extends Controller
             'url' => $file->url,
             'originalUrl' => $file->original_url ?? $file->url,
         ];
+    }
+
+    private function uploadResponsePayload(MediaFile $file): array
+    {
+        $payload = $this->uploadPayload($file);
+        $response = [
+            'data' => $payload,
+            'url' => $payload['url'],
+        ];
+
+        if (in_array($file->type, ['image', 'video', 'audio'], true)) {
+            $response[$file->type] = $payload['url'];
+        }
+
+        return $response;
     }
 
     private function ok(array $payload = []): JsonResponse

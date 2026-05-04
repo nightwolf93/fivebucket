@@ -1,10 +1,11 @@
-import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
+import { CopyButton, EmptyState, ExternalButton, Field, KpiCard, PageHeader, Pagination } from '@/Components/Design';
 import { Badge } from '@/Components/ui/badge';
 import { Button } from '@/Components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/Components/ui/card';
+import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, Link, router, useForm, usePage } from '@inertiajs/react';
-import { useRef } from 'react';
-import { Copy, ExternalLink, FileAudio, FileBox, FileVideo, Image, Search, Trash2, UploadCloud } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Archive, FileAudio, FileBox, FileVideo, Image, Search, Trash2, UploadCloud } from 'lucide-react';
 
 const typeIcons = {
     image: Image,
@@ -13,15 +14,68 @@ const typeIcons = {
     file: FileBox,
 };
 
+const filterTypes = ['all', 'image', 'video', 'audio', 'file'];
+
 export default function MediaIndex({ auth, filters, team, summary, files }) {
     const { flash } = usePage().props;
     const fileInput = useRef(null);
+    const [items, setItems] = useState(files.data);
+    const [liveSummary, setLiveSummary] = useState(summary);
+    const [liveCount, setLiveCount] = useState(0);
     const uploadForm = useForm({
         uploads: [],
         path: '',
         metadata: '',
         retention_exempt: false,
     });
+
+    useEffect(() => {
+        setItems(files.data);
+        setLiveSummary(summary);
+        setLiveCount(0);
+    }, [files.data, summary]);
+
+    useEffect(() => {
+        if (!team?.id || !window.Echo) {
+            return undefined;
+        }
+
+        const channelName = `teams.${team.id}.media`;
+        const channel = window.Echo.private(channelName);
+
+        channel
+            .listen('.media.created', (event) => {
+                if (!event.file) {
+                    return;
+                }
+
+                setLiveSummary((current) => applyMediaDelta(current, event.file.type, 1));
+                setLiveCount((count) => count + 1);
+
+                if (!matchesMediaFilters(event.file, filters)) {
+                    return;
+                }
+
+                setItems((current) => {
+                    if (current.some((file) => file.id === event.file.id)) {
+                        return current;
+                    }
+
+                    return [event.file, ...current].slice(0, 120);
+                });
+            })
+            .listen('.media.deleted', (event) => {
+                if (!event.deleted) {
+                    return;
+                }
+
+                setLiveSummary((current) => applyMediaDelta(current, event.deleted.type, -1));
+                setLiveCount((count) => count + 1);
+                setItems((current) => current.filter((file) => file.id !== event.deleted.id && file.publicId !== event.deleted.publicId));
+            });
+
+        return () => window.Echo.leave(channelName);
+    }, [filters, team?.id]);
 
     const updateFilters = (next) => {
         router.get(route('media.index'), { ...filters, ...next }, { preserveState: true, replace: true });
@@ -43,53 +97,57 @@ export default function MediaIndex({ auth, filters, team, summary, files }) {
         <AuthenticatedLayout user={auth.user}>
             <Head title="Media" />
 
-            <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-                <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
-                    <div>
-                        <p className="text-sm font-medium text-slate-500">{team.name}</p>
-                        <h1 className="mt-1 text-2xl font-semibold text-slate-950">Assets & Media</h1>
-                        <p className="mt-2 text-sm text-slate-600">Browse, preview, copy public URLs, and remove uploaded files.</p>
-                    </div>
-                    <Badge>{team.storageUsed} / {team.storageLimit}</Badge>
+            <div className="fb-page">
+                <PageHeader
+                    eyebrow={team.name}
+                    title="Assets & Media"
+                    description="Browse, preview, upload, copy public URLs, and remove files stored through FiveBucket."
+                    actions={(
+                        <div className="fb-page-actions">
+                            <Badge>{team.storageUsed} / {team.storageLimit}</Badge>
+                            <Badge variant={liveCount > 0 ? 'green' : 'default'}>{liveCount > 0 ? `${liveCount} live updates` : 'Live ready'}</Badge>
+                        </div>
+                    )}
+                />
+
+                <div className="fb-kpis">
+                    <KpiCard icon={Archive} label="Total files" value={liveSummary.total} detail="all uploaded assets" />
+                    <KpiCard icon={Image} label="Images" value={liveSummary.images} detail="screenshots, photos, evidence" />
+                    <KpiCard icon={FileVideo} label="Videos" value={liveSummary.videos} detail="clips and recordings" tone="muted" />
+                    <KpiCard icon={FileAudio} label="Audio" value={liveSummary.audio} detail={`${liveSummary.files} other files`} tone="muted" />
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-4">
-                    <Summary label="Images" value={summary.images} />
-                    <Summary label="Videos" value={summary.videos} />
-                    <Summary label="Audio" value={summary.audio} />
-                    <Summary label="Other files" value={summary.files} />
-                </div>
+                {flash.success && <div className="fb-alert success mb-3">{flash.success}</div>}
 
-                {flash.success && (
-                    <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-                        {flash.success}
-                    </div>
-                )}
-
-                <Card>
+                <Card className="mb-3">
                     <CardHeader>
-                        <CardTitle>Upload From Browser</CardTitle>
+                        <div>
+                            <CardTitle>Upload From Browser</CardTitle>
+                            <p className="fb-panel-subtitle">Images, videos, audio and arbitrary files. Quotas are enforced server-side.</p>
+                        </div>
                     </CardHeader>
                     <CardContent>
-                        <form onSubmit={submitUpload} className="grid gap-4 lg:grid-cols-[1fr_220px]">
-                            <div className="space-y-4">
-                                <label className="flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center transition hover:bg-slate-100">
-                                    <UploadCloud className="h-8 w-8 text-slate-500" />
-                                    <span className="mt-3 text-sm font-medium text-slate-800">Choose images, videos, audio, or files</span>
-                                    <span className="mt-1 text-xs text-slate-500">Multiple uploads are supported. Quotas are enforced per account.</span>
-                                    <input
-                                        ref={fileInput}
-                                        type="file"
-                                        multiple
-                                        className="sr-only"
-                                        accept="image/*,video/*,audio/*,*/*"
-                                        onChange={(event) => uploadForm.setData('uploads', Array.from(event.target.files ?? []))}
-                                    />
+                        <form onSubmit={submitUpload} className="fb-grid" style={{ gridTemplateColumns: 'minmax(0, 1fr) 280px' }}>
+                            <div className="fb-stack">
+                                <label className="fb-upload-zone">
+                                    <div>
+                                        <UploadCloud className="mx-auto h-8 w-8 fb-muted" />
+                                        <div className="mt-3 text-[13px] font-semibold text-[var(--fg)]">Choose media files</div>
+                                        <div className="mt-1 text-[11px] fb-dim">Multiple uploads supported · R2-backed storage</div>
+                                        <input
+                                            ref={fileInput}
+                                            type="file"
+                                            multiple
+                                            className="sr-only"
+                                            accept="image/*,video/*,audio/*,*/*"
+                                            onChange={(event) => uploadForm.setData('uploads', Array.from(event.target.files ?? []))}
+                                        />
+                                    </div>
                                 </label>
 
                                 {uploadForm.data.uploads.length > 0 && (
-                                    <div className="rounded-md border border-slate-200 bg-white p-3">
-                                        <div className="text-xs font-medium text-slate-500">Selected files</div>
+                                    <div className="fb-panel-content rounded-md border border-[var(--border)] bg-[var(--bg)]">
+                                        <div className="fb-label">Selected files</div>
                                         <div className="mt-2 flex flex-wrap gap-2">
                                             {uploadForm.data.uploads.map((file) => (
                                                 <Badge key={`${file.name}-${file.size}`}>{file.name}</Badge>
@@ -98,47 +156,44 @@ export default function MediaIndex({ auth, filters, team, summary, files }) {
                                     </div>
                                 )}
 
-                                {uploadForm.errors.uploads && <div className="text-sm text-red-600">{uploadForm.errors.uploads}</div>}
+                                {uploadForm.errors.uploads && <div className="fb-error-text">{uploadForm.errors.uploads}</div>}
                                 {uploadForm.progress && (
-                                    <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                                        <div className="h-full rounded-full bg-emerald-500" style={{ width: `${uploadForm.progress.percentage}%` }} />
+                                    <div className="fb-progress">
+                                        <div className="fb-progress-bar" style={{ width: `${uploadForm.progress.percentage}%` }} />
                                     </div>
                                 )}
                             </div>
 
-                            <div className="space-y-4">
-                                <label className="block text-sm font-medium text-slate-700">
-                                    Folder path
+                            <div className="fb-form-grid">
+                                <Field label="Folder path" help="Example: screenshots/police">
                                     <input
-                                        className="mt-1 h-10 w-full rounded-md border-slate-300 text-sm shadow-sm focus:border-slate-500 focus:ring-slate-500"
+                                        className="fb-input"
                                         placeholder="screenshots/police"
                                         value={uploadForm.data.path}
                                         onChange={(event) => uploadForm.setData('path', event.target.value)}
                                     />
-                                </label>
+                                </Field>
 
-                                <label className="block text-sm font-medium text-slate-700">
-                                    Metadata JSON
+                                <Field label="Metadata JSON" error={uploadForm.errors.metadata}>
                                     <textarea
-                                        className="mt-1 min-h-24 w-full rounded-md border-slate-300 text-sm shadow-sm focus:border-slate-500 focus:ring-slate-500"
+                                        className="fb-textarea"
                                         placeholder='{"server":"main"}'
                                         value={uploadForm.data.metadata}
                                         onChange={(event) => uploadForm.setData('metadata', event.target.value)}
                                     />
-                                    {uploadForm.errors.metadata && <span className="mt-1 block text-xs text-red-600">{uploadForm.errors.metadata}</span>}
-                                </label>
+                                </Field>
 
-                                <label className="flex items-center gap-2 text-sm text-slate-700">
+                                <label className="flex items-center gap-2 text-[12px] fb-muted">
                                     <input
                                         type="checkbox"
                                         checked={uploadForm.data.retention_exempt}
                                         onChange={(event) => uploadForm.setData('retention_exempt', event.target.checked)}
-                                        className="rounded border-slate-300 text-slate-950"
+                                        className="rounded border-[var(--border)] bg-[var(--bg)] text-emerald-500"
                                     />
-                                    Exempt from retention cleanup
+                                    Retention exempt
                                 </label>
 
-                                <Button type="submit" disabled={uploadForm.processing || uploadForm.data.uploads.length === 0} className="w-full">
+                                <Button type="submit" disabled={uploadForm.processing || uploadForm.data.uploads.length === 0}>
                                     <UploadCloud className="h-4 w-4" />
                                     Upload media
                                 </Button>
@@ -148,27 +203,30 @@ export default function MediaIndex({ auth, filters, team, summary, files }) {
                 </Card>
 
                 <Card>
-                    <CardHeader className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                        <CardTitle>Library</CardTitle>
-                        <div className="flex flex-col gap-2 md:flex-row md:items-center">
-                            <div className="relative">
-                                <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                    <CardHeader>
+                        <div>
+                            <CardTitle>Library</CardTitle>
+                            <p className="fb-panel-subtitle">{files.meta.total} matching files · {team.publicBaseUrl ?? 'fallback public URL'}</p>
+                        </div>
+                        <div className="fb-page-actions">
+                            <label className="relative">
+                                <Search className="pointer-events-none absolute left-3 top-2.5 h-3.5 w-3.5 fb-dim" />
                                 <input
-                                    className="h-9 w-full rounded-md border-slate-300 pl-9 text-sm shadow-sm focus:border-slate-500 focus:ring-slate-500 md:w-72"
+                                    className="fb-input w-72 pl-9"
                                     placeholder="Search filename, id, path"
                                     defaultValue={filters.search}
                                     onKeyDown={(event) => {
                                         if (event.key === 'Enter') updateFilters({ search: event.currentTarget.value });
                                     }}
                                 />
-                            </div>
-                            <div className="flex gap-1 rounded-md border border-slate-200 bg-white p-1">
-                                {['all', 'image', 'video', 'audio', 'file'].map((type) => (
+                            </label>
+                            <div className="fb-segmented">
+                                {filterTypes.map((type) => (
                                     <button
                                         key={type}
                                         type="button"
                                         onClick={() => updateFilters({ type })}
-                                        className={`h-8 rounded px-3 text-xs font-medium ${filters.type === type ? 'bg-slate-950 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+                                        className={filters.type === type ? 'active' : ''}
                                     >
                                         {type}
                                     </button>
@@ -177,29 +235,17 @@ export default function MediaIndex({ auth, filters, team, summary, files }) {
                         </div>
                     </CardHeader>
                     <CardContent>
-                        {files.data.length === 0 ? (
-                            <Empty>No media found.</Empty>
+                        {items.length === 0 ? (
+                            <EmptyState>No media found.</EmptyState>
                         ) : (
-                            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                                {files.data.map((file) => (
+                            <div className="fb-grid cols-3">
+                                {items.map((file) => (
                                     <AssetCard key={file.id} file={file} />
                                 ))}
                             </div>
                         )}
 
-                        {files.meta.lastPage > 1 && (
-                            <div className="mt-6 flex flex-wrap gap-2">
-                                {files.links.map((link, index) => (
-                                    <Link
-                                        key={`${link.label}-${index}`}
-                                        href={link.url ?? '#'}
-                                        preserveScroll
-                                        className={`rounded-md border px-3 py-2 text-sm ${link.active ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-200 text-slate-700'} ${!link.url ? 'pointer-events-none opacity-50' : ''}`}
-                                        dangerouslySetInnerHTML={{ __html: link.label }}
-                                    />
-                                ))}
-                            </div>
-                        )}
+                        {files.meta.lastPage > 1 && <Pagination links={files.links} />}
                     </CardContent>
                 </Card>
             </div>
@@ -207,68 +253,83 @@ export default function MediaIndex({ auth, filters, team, summary, files }) {
     );
 }
 
+function applyMediaDelta(summary, type, delta) {
+    const next = { ...summary };
+    const key = summaryKeyForType(type);
+
+    next.total = Math.max(0, Number(next.total || 0) + delta);
+
+    if (key) {
+        next[key] = Math.max(0, Number(next[key] || 0) + delta);
+    }
+
+    return next;
+}
+
+function summaryKeyForType(type) {
+    return {
+        image: 'images',
+        video: 'videos',
+        audio: 'audio',
+        file: 'files',
+    }[type];
+}
+
+function matchesMediaFilters(file, filters) {
+    if (filters.type && filters.type !== 'all' && file.type !== filters.type) {
+        return false;
+    }
+
+    const query = (filters.search || '').trim().toLowerCase();
+    if (!query) {
+        return true;
+    }
+
+    const haystack = `${file.filename || ''} ${file.publicId || ''} ${file.path || ''}`.toLowerCase();
+
+    return haystack.includes(query);
+}
+
 function AssetCard({ file }) {
     const Icon = typeIcons[file.type] ?? FileBox;
 
     return (
-        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-            <div className="flex aspect-video items-center justify-center bg-slate-100">
+        <div className="fb-media-card">
+            <div className="fb-media-preview">
                 {file.type === 'image' ? (
-                    <img src={file.url} alt={file.filename} className="h-full w-full object-cover" loading="lazy" />
+                    <img src={file.url} alt={file.filename} loading="lazy" />
                 ) : file.type === 'video' ? (
-                    <video src={file.url} className="h-full w-full object-cover" controls />
+                    <video src={file.url} controls />
                 ) : file.type === 'audio' ? (
                     <div className="w-full px-4">
-                        <Icon className="mx-auto mb-4 h-10 w-10 text-slate-500" />
+                        <Icon className="mx-auto mb-4 h-10 w-10 fb-muted" />
                         <audio src={file.url} className="w-full" controls />
                     </div>
                 ) : (
-                    <Icon className="h-12 w-12 text-slate-500" />
+                    <Icon className="h-12 w-12 fb-muted" />
                 )}
             </div>
-            <div className="space-y-3 p-4">
+            <div className="p-3">
                 <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-slate-950">{file.filename}</div>
-                    <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
+                    <div className="truncate text-[13px] font-semibold text-[var(--fg)]">{file.filename}</div>
+                    <div className="mt-1 flex flex-wrap gap-2">
                         <Badge>{file.type}</Badge>
-                        <span>{file.size}</span>
-                        <span>{file.createdAt}</span>
+                        <span className="fb-mono text-[10px] fb-dim">{file.size}</span>
+                        <span className="fb-mono text-[10px] fb-dim">{file.createdAt}</span>
                     </div>
                 </div>
-                <code className="block truncate rounded-md bg-slate-50 px-2 py-1 text-xs text-slate-500">{file.publicId}</code>
-                <div className="flex gap-2">
-                    <Button type="button" variant="secondary" size="sm" onClick={() => navigator.clipboard?.writeText(file.url)}>
-                        <Copy className="h-4 w-4" />
-                        Copy URL
-                    </Button>
-                    <Button asChild type="button" variant="secondary" size="sm">
-                        <a href={file.url} target="_blank" rel="noreferrer">
-                            <ExternalLink className="h-4 w-4" />
-                            Open
-                        </a>
-                    </Button>
+                <code className="fb-inline-code mt-3 block truncate">{file.publicId}</code>
+                {file.path && <div className="mt-2 truncate fb-mono text-[10px] fb-dim">{file.path}</div>}
+                <div className="mt-3 flex flex-wrap gap-2">
+                    <CopyButton value={file.url} label="URL" />
+                    <ExternalButton href={file.url} />
                     <Button asChild variant="destructive" size="sm">
                         <Link href={route('media.destroy', file.id)} method="delete" as="button" preserveScroll>
-                            <Trash2 className="h-4 w-4" />
+                            <Trash2 className="h-3.5 w-3.5" />
                         </Link>
                     </Button>
                 </div>
             </div>
         </div>
     );
-}
-
-function Summary({ label, value }) {
-    return (
-        <Card>
-            <CardContent>
-                <div className="text-sm text-slate-500">{label}</div>
-                <div className="mt-1 text-2xl font-semibold text-slate-950">{value}</div>
-            </CardContent>
-        </Card>
-    );
-}
-
-function Empty({ children }) {
-    return <div className="py-14 text-center text-sm text-slate-500">{children}</div>;
 }

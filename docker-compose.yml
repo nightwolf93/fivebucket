@@ -73,6 +73,22 @@ services:
     depends_on:
       app:
         condition: service_started
+      soketi:
+        condition: service_started
+    restart: unless-stopped
+
+  soketi:
+    image: quay.io/soketi/soketi:1.6-16-alpine
+    env_file:
+      - ${FIVEBUCKET_ENV_FILE:-.env.docker.example}
+    environment:
+      SOKETI_DEFAULT_APP_ID: ${SOKETI_DEFAULT_APP_ID:-fivebucket}
+      SOKETI_DEFAULT_APP_KEY: ${SOKETI_DEFAULT_APP_KEY:-fivebucket}
+      SOKETI_DEFAULT_APP_SECRET: ${SOKETI_DEFAULT_APP_SECRET:-change_me_soketi}
+      SOKETI_DEBUG: ${SOKETI_DEBUG:-0}
+      SOKETI_METRICS_SERVER_PORT: 9601
+    ports:
+      - "${SOKETI_PORT:-6001}:6001"
     restart: unless-stopped
 
   mysql:
