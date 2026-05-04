@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Jobs\EvaluateLogAlerts;
+use App\Models\ApiToken;
 use App\Models\LogAlertRule;
 use App\Models\LogEntry;
 use App\Models\LogWebhookEndpoint;
@@ -158,5 +159,78 @@ class LogAlertingTest extends TestCase
             'name' => 'ATM completed',
             'message_template' => 'ATM {action} char={charId}',
         ]);
+    }
+
+    public function test_per_log_alert_posts_each_matching_ingested_log_without_filter_dump(): void
+    {
+        Http::fake([
+            'discord.com/api/webhooks/*' => Http::response('', 204),
+        ]);
+
+        $user = User::factory()->create();
+        $team = app(TeamProvisioner::class)->createDefaultTeam($user);
+        [, $plainToken] = ApiToken::issue($team, $user, 'Logs key', ['logs']);
+        $webhook = LogWebhookEndpoint::create([
+            'team_id' => $team->id,
+            'name' => 'Moderation audit',
+            'type' => 'discord',
+            'url' => 'https://discord.com/api/webhooks/456/mod-token',
+            'enabled' => true,
+        ]);
+
+        $rule = LogAlertRule::create([
+            'team_id' => $team->id,
+            'log_webhook_endpoint_id' => $webhook->id,
+            'name' => 'Admin commands',
+            'trigger_mode' => 'per_log',
+            'filters' => [
+                'level' => 'info',
+                'resource' => 'admin',
+                'metadataFilters' => [
+                    ['key' => 'action', 'operator' => 'exact', 'value' => 'admin_command'],
+                ],
+            ],
+            'threshold_count' => 99,
+            'window_minutes' => 60,
+            'cooldown_minutes' => 60,
+            'enabled' => true,
+            'message_template' => 'Admin command: {command} by {moderator} target={targetId}',
+        ]);
+
+        $this->postJson('/api/logs', [
+            [
+                'level' => 'info',
+                'resource' => 'admin',
+                'message' => 'Moderator used /revive',
+                'metadata' => [
+                    'action' => 'admin_command',
+                    'command' => '/revive',
+                    'moderator' => 'Nightwolf',
+                    'targetId' => 42,
+                ],
+            ],
+            [
+                'level' => 'info',
+                'resource' => 'admin',
+                'message' => 'Moderator opened menu',
+                'metadata' => ['action' => 'menu_open'],
+            ],
+        ], ['Authorization' => $plainToken])->assertOk();
+
+        Http::assertSentCount(1);
+        Http::assertSent(function ($request) {
+            $data = $request->data();
+            $payload = json_encode($data, JSON_UNESCAPED_SLASHES);
+            $embed = $data['embeds'][0] ?? [];
+
+            return str_contains($request->url(), 'discord.com/api/webhooks/456/mod-token')
+                && ($embed['description'] ?? '') === 'Admin command: /revive by Nightwolf target=42'
+                && collect($embed['fields'] ?? [])->contains(fn ($field) => ($field['name'] ?? '') === 'Triggered log')
+                && ! str_contains($payload, 'Filters')
+                && ! str_contains($payload, 'metadataFilters');
+        });
+
+        $this->assertSame(1, $rule->fresh()->last_count);
+        $this->assertNotNull($rule->fresh()->last_triggered_at);
     }
 }

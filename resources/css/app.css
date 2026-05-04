@@ -910,6 +910,50 @@
         grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 
+    .fb-alert-mode {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+
+    .fb-alert-mode button {
+        min-width: 0;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--bg-elev);
+        padding: 10px;
+        text-align: left;
+    }
+
+    .fb-alert-mode button.active {
+        border-color: var(--accent-border);
+        background: var(--accent-bg);
+    }
+
+    .fb-alert-mode strong {
+        display: block;
+        color: var(--fg);
+        font-size: 12px;
+        font-weight: 650;
+    }
+
+    .fb-alert-mode span,
+    .fb-alert-mode-note {
+        display: block;
+        margin-top: 4px;
+        color: var(--fg-muted);
+        font-size: 11px;
+        line-height: 1.5;
+    }
+
+    .fb-alert-mode-note {
+        margin-top: 0;
+        border: 1px solid var(--accent-border);
+        border-radius: var(--radius);
+        background: var(--accent-bg);
+        padding: 10px;
+    }
+
     .fb-alert-config .fb-alert-conditions {
         margin: 0;
     }
@@ -3147,6 +3191,7 @@
     .fb-alert-grid,
     .fb-alert-grid.compact,
     .fb-alert-grid.policy,
+    .fb-alert-mode,
     .fb-alert-preview-grid,
     .fb-alert-field-grid {
         grid-template-columns: 1fr;

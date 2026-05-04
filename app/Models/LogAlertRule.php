@@ -14,6 +14,7 @@ class LogAlertRule extends Model
         'team_id',
         'log_webhook_endpoint_id',
         'name',
+        'trigger_mode',
         'filters',
         'threshold_count',
         'window_minutes',

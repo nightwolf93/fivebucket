@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Jobs\EvaluateLogAlerts;
 use App\Models\LogAlertRule;
 use App\Services\Logs\LogAlertDispatcher;
+use App\Services\Logs\LogFilterMatcher;
 use App\Services\Logs\LogStorage;
 use App\Services\TeamProvisioner;
 use Illuminate\Http\JsonResponse;
@@ -19,6 +20,7 @@ class LogAlertRuleController extends Controller
         private readonly TeamProvisioner $teams,
         private readonly LogStorage $logs,
         private readonly LogAlertDispatcher $dispatcher,
+        private readonly LogFilterMatcher $matcher,
     ) {}
 
     public function index(Request $request): Response
@@ -97,6 +99,7 @@ class LogAlertRuleController extends Controller
         $validated = $request->validate([
             'filters' => ['required', 'array'],
             'name' => ['nullable', 'string', 'max:100'],
+            'trigger_mode' => ['nullable', 'string', 'in:threshold,per_log'],
             'message_template' => ['nullable', 'string', 'max:2000'],
             'sample' => ['nullable', 'array'],
             'threshold_count' => ['nullable', 'integer', 'min:1', 'max:100000'],
@@ -111,6 +114,27 @@ class LogAlertRuleController extends Controller
         $filters['from'] = now()->subMinutes($window)->toIso8601String();
         $filters['to'] = now()->toIso8601String();
         $filters['sort'] = 'newest';
+
+        if (($validated['trigger_mode'] ?? 'threshold') === 'per_log' && isset($validated['sample'])) {
+            $matches = $this->matcher->matches($validated['sample'], $filters);
+            $samples = $matches ? [$validated['sample']] : [];
+
+            return response()->json([
+                'count' => $matches ? 1 : 0,
+                'threshold' => 1,
+                'windowMinutes' => 0,
+                'willTrigger' => $matches,
+                'samples' => $samples,
+                'renderedMessage' => $this->dispatcher->renderAlertMessage(
+                    $validated['message_template'] ?? '',
+                    $validated['name'] ?? 'Preview alert',
+                    $matches ? 1 : 0,
+                    1,
+                    0,
+                    $validated['sample'],
+                ),
+            ]);
+        }
 
         $count = $this->logs->count($team, $filters);
         $samples = $this->logs->export($team, $filters, 3);
@@ -138,6 +162,7 @@ class LogAlertRuleController extends Controller
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:100'],
             'log_webhook_endpoint_id' => ['required', 'integer'],
+            'trigger_mode' => ['nullable', 'string', 'in:threshold,per_log'],
             'filters' => ['required', 'array'],
             'threshold_count' => ['required', 'integer', 'min:1', 'max:100000'],
             'window_minutes' => ['required', 'integer', 'min:1', 'max:10080'],
@@ -147,6 +172,7 @@ class LogAlertRuleController extends Controller
         ]);
 
         $validated['enabled'] = (bool) ($validated['enabled'] ?? true);
+        $validated['trigger_mode'] = $validated['trigger_mode'] ?? 'threshold';
         $validated['filters'] = $this->cleanFilters($validated['filters']);
 
         return $validated;
@@ -171,6 +197,7 @@ class LogAlertRuleController extends Controller
         return [
             'id' => $rule->id,
             'name' => $rule->name,
+            'triggerMode' => $rule->trigger_mode ?? 'threshold',
             'filters' => $rule->filters,
             'thresholdCount' => $rule->threshold_count,
             'windowMinutes' => $rule->window_minutes,

@@ -16,9 +16,7 @@ use Throwable;
 
 class LogController extends Controller
 {
-    public function __construct(private readonly LogStorage $logs)
-    {
-    }
+    public function __construct(private readonly LogStorage $logs) {}
 
     public function ingest(Request $request): JsonResponse
     {
@@ -62,9 +60,10 @@ class LogController extends Controller
             }
 
             $team = $this->team($request);
+            $logs = $this->logPayloads($entries);
             $stored = $this->logs->store($team, $this->apiToken($request), $entries);
-            $this->broadcastLogs($team, $entries, $stored);
-            $this->evaluateAlerts($team, $stored);
+            $this->broadcastLogs($team, $logs, $stored);
+            $this->evaluateAlerts($team, $stored, $logs);
 
             return $this->ok();
         } catch (Throwable $exception) {
@@ -89,9 +88,10 @@ class LogController extends Controller
             }
 
             $team = $this->team($request);
+            $logs = $this->logPayloads($entries);
             $stored = $this->logs->store($team, $this->apiToken($request), $entries);
-            $this->broadcastLogs($team, $entries, $stored);
-            $this->evaluateAlerts($team, $stored);
+            $this->broadcastLogs($team, $logs, $stored);
+            $this->evaluateAlerts($team, $stored, $logs);
 
             return $this->ok();
         } catch (Throwable $exception) {
@@ -125,17 +125,11 @@ class LogController extends Controller
         return response()->json(['status' => 'ok']);
     }
 
-    private function broadcastLogs(Team $team, array $entries, int $stored): void
+    private function broadcastLogs(Team $team, array $logs, int $stored): void
     {
         if ($stored <= 0) {
             return;
         }
-
-        $logs = collect($entries)
-            ->filter(fn ($entry) => is_array($entry))
-            ->map(fn (array $entry) => $this->broadcastPayload($entry))
-            ->values()
-            ->all();
 
         if ($logs === []) {
             return;
@@ -148,20 +142,29 @@ class LogController extends Controller
         }
     }
 
-    private function evaluateAlerts(Team $team, int $stored): void
+    private function evaluateAlerts(Team $team, int $stored, array $logs): void
     {
         if ($stored <= 0 || ! $team->logAlertRules()->where('enabled', true)->exists()) {
             return;
         }
 
         try {
-            EvaluateLogAlerts::dispatch($team->id);
+            EvaluateLogAlerts::dispatch($team->id, null, false, $logs);
         } catch (Throwable $exception) {
             report($exception);
         }
     }
 
-    private function broadcastPayload(array $entry): array
+    private function logPayloads(array $entries): array
+    {
+        return collect($entries)
+            ->filter(fn ($entry) => is_array($entry))
+            ->map(fn (array $entry) => $this->logPayload($entry))
+            ->values()
+            ->all();
+    }
+
+    private function logPayload(array $entry): array
     {
         $occurredAt = $this->timestamp($entry['timestamp'] ?? $entry['occurred_at'] ?? null) ?? now();
 

@@ -28,6 +28,7 @@ export default function AlertsIndex({ auth, team, rules, webhooks }) {
     const form = useForm({
         name: 'New alert',
         log_webhook_endpoint_id: webhooks[0]?.id ? String(webhooks[0].id) : '',
+        trigger_mode: 'threshold',
         q: '',
         qMode: 'all',
         level: 'all',
@@ -66,6 +67,7 @@ export default function AlertsIndex({ auth, team, rules, webhooks }) {
     const previewSignature = JSON.stringify({
         filters: activeFilters,
         name: form.data.name,
+        trigger_mode: form.data.trigger_mode,
         message_template: form.data.message_template,
         sample: sourceLog,
         threshold_count: Number(form.data.threshold_count) || 1,
@@ -112,6 +114,7 @@ export default function AlertsIndex({ auth, team, rules, webhooks }) {
         router.patch(route('alerts.update', rule.id), {
             name: rule.name,
             log_webhook_endpoint_id: rule.webhook?.id,
+            trigger_mode: rule.triggerMode || 'threshold',
             filters: rule.filters,
             threshold_count: rule.thresholdCount,
             window_minutes: rule.windowMinutes,
@@ -162,6 +165,7 @@ export default function AlertsIndex({ auth, team, rules, webhooks }) {
         form.setData('resource', '');
         form.setData('q', '');
         form.setData('qMode', 'all');
+        form.setData('trigger_mode', 'threshold');
         form.setData('message_template', 'FiveBucket matched {count} logs for {name} in the last {window} minutes.');
     };
 
@@ -282,6 +286,17 @@ export default function AlertsIndex({ auth, team, rules, webhooks }) {
                         </section>
 
                         <section className="fb-alert-config">
+                            <div className="fb-alert-mode">
+                                <button type="button" className={form.data.trigger_mode === 'per_log' ? 'active' : ''} onClick={() => form.setData('trigger_mode', 'per_log')}>
+                                    <strong>Every matching log</strong>
+                                    <span>Send one Discord message for each new log that matches. Best for admin commands and audit trails.</span>
+                                </button>
+                                <button type="button" className={form.data.trigger_mode === 'threshold' ? 'active' : ''} onClick={() => form.setData('trigger_mode', 'threshold')}>
+                                    <strong>Threshold window</strong>
+                                    <span>Send one alert when the count reaches a threshold inside a time window.</span>
+                                </button>
+                            </div>
+
                             <div className="fb-alert-grid compact">
                                 <Field label="Name" error={form.errors.name}>
                                     <input className="fb-input" value={form.data.name} onChange={(event) => form.setData('name', event.target.value)} maxLength="100" />
@@ -351,17 +366,23 @@ export default function AlertsIndex({ auth, team, rules, webhooks }) {
                                 )}
                             </div>
 
-                            <div className="fb-alert-grid compact policy">
-                                <Field label="Threshold">
-                                    <input className="fb-input" type="number" min="1" value={form.data.threshold_count} onChange={(event) => form.setData('threshold_count', event.target.value)} />
-                                </Field>
-                                <Field label="Window minutes">
-                                    <input className="fb-input" type="number" min="1" value={form.data.window_minutes} onChange={(event) => form.setData('window_minutes', event.target.value)} />
-                                </Field>
-                                <Field label="Cooldown minutes">
-                                    <input className="fb-input" type="number" min="0" value={form.data.cooldown_minutes} onChange={(event) => form.setData('cooldown_minutes', event.target.value)} />
-                                </Field>
-                            </div>
+                            {form.data.trigger_mode === 'threshold' ? (
+                                <div className="fb-alert-grid compact policy">
+                                    <Field label="Threshold">
+                                        <input className="fb-input" type="number" min="1" value={form.data.threshold_count} onChange={(event) => form.setData('threshold_count', event.target.value)} />
+                                    </Field>
+                                    <Field label="Window minutes">
+                                        <input className="fb-input" type="number" min="1" value={form.data.window_minutes} onChange={(event) => form.setData('window_minutes', event.target.value)} />
+                                    </Field>
+                                    <Field label="Cooldown minutes">
+                                        <input className="fb-input" type="number" min="0" value={form.data.cooldown_minutes} onChange={(event) => form.setData('cooldown_minutes', event.target.value)} />
+                                    </Field>
+                                </div>
+                            ) : (
+                                <div className="fb-alert-mode-note">
+                                    Per-log mode ignores threshold, window and cooldown. Every newly ingested matching log sends its own Discord message.
+                                </div>
+                            )}
 
                             <Field label="Discord message template" error={form.errors.message_template}>
                                 <textarea className="fb-textarea" value={form.data.message_template} onChange={(event) => form.setData('message_template', event.target.value)} />
@@ -394,9 +415,9 @@ export default function AlertsIndex({ auth, team, rules, webhooks }) {
                         </div>
 
                         <div className="fb-alert-preview-grid">
-                            <PreviewMetric label="Matched in window" value={preview.loading ? '...' : String(preview.count ?? 0)} />
-                            <PreviewMetric label="Threshold" value={`${preview.threshold ?? form.data.threshold_count} logs`} />
-                            <PreviewMetric label="Would trigger" value={preview.willTrigger ? 'yes' : 'no'} state={preview.willTrigger ? 'ok' : 'idle'} />
+                            <PreviewMetric label={form.data.trigger_mode === 'per_log' ? 'Matched now' : 'Matched in window'} value={preview.loading ? '...' : String(preview.count ?? 0)} />
+                            <PreviewMetric label={form.data.trigger_mode === 'per_log' ? 'Mode' : 'Threshold'} value={form.data.trigger_mode === 'per_log' ? 'per log' : `${preview.threshold ?? form.data.threshold_count} logs`} />
+                            <PreviewMetric label={form.data.trigger_mode === 'per_log' ? 'Selected log' : 'Would trigger'} value={form.data.trigger_mode === 'per_log' ? (sampleMatch ? 'will send' : 'no match') : (preview.willTrigger ? 'yes' : 'no')} state={(form.data.trigger_mode === 'per_log' ? sampleMatch : preview.willTrigger) ? 'ok' : 'idle'} />
                         </div>
 
                         {preview.error && <div className="fb-alert warning">{preview.error}</div>}
@@ -447,6 +468,7 @@ export default function AlertsIndex({ auth, team, rules, webhooks }) {
                             <thead>
                                 <tr>
                                     <th>Name</th>
+                                    <th>Mode</th>
                                     <th>Filter</th>
                                     <th>Threshold</th>
                                     <th>Webhook</th>
@@ -462,8 +484,9 @@ export default function AlertsIndex({ auth, team, rules, webhooks }) {
                                             <div className="font-semibold text-[var(--fg)]">{rule.name}</div>
                                             <div className="fb-mono text-[10px] fb-dim">id {rule.id}</div>
                                         </td>
+                                        <td><Badge variant={rule.triggerMode === 'per_log' ? 'green' : 'default'}>{rule.triggerMode === 'per_log' ? 'per log' : 'threshold'}</Badge></td>
                                         <td><code className="fb-inline-code">{filterSummary(rule.filters)}</code></td>
-                                        <td className="fb-mono">{rule.thresholdCount} / {rule.windowMinutes}m</td>
+                                        <td className="fb-mono">{rule.triggerMode === 'per_log' ? 'each match' : `${rule.thresholdCount} / ${rule.windowMinutes}m`}</td>
                                         <td>{rule.webhook ? rule.webhook.name : <Badge variant="amber">missing</Badge>}</td>
                                         <td className="fb-mono">{rule.lastCheckedAt || 'never'} · count {rule.lastCount}</td>
                                         <td><Badge variant={rule.enabled ? 'green' : 'amber'}>{rule.enabled ? 'enabled' : 'disabled'}</Badge></td>
@@ -567,6 +590,7 @@ function buildSeedFromLog(log) {
     return {
         form: {
             name: truncate(`Alert: ${label}`, 100),
+            trigger_mode: 'per_log',
             level: safeLevel(log.level),
             resource: log.resource || '',
             q: '',

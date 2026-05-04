@@ -46,17 +46,11 @@ class LogAlertDispatcher
 
         if ($samples !== []) {
             $fields[] = [
-                'name' => 'Sample',
+                'name' => 'Recent match',
                 'value' => '```'.substr($this->sampleText($samples[0]), 0, 900).'```',
                 'inline' => false,
             ];
         }
-
-        $fields[] = [
-            'name' => 'Filters',
-            'value' => '```json'."\n".substr(json_encode($rule->filters ?? [], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), 0, 900)."\n".'```',
-            'inline' => false,
-        ];
 
         return $this->sendDiscord($endpoint, [
             'username' => 'FiveBucket',
@@ -66,6 +60,44 @@ class LogAlertDispatcher
                 'color' => 15158332,
                 'fields' => $fields,
                 'timestamp' => now()->toIso8601String(),
+            ]],
+        ]);
+    }
+
+    public function sendLogAlert(LogAlertRule $rule, array $log): bool
+    {
+        $endpoint = $rule->webhookEndpoint;
+
+        if (! $endpoint || ! $endpoint->enabled) {
+            return false;
+        }
+
+        $description = $this->renderAlertMessage(
+            $rule->message_template,
+            $rule->name,
+            1,
+            1,
+            0,
+            $log,
+        );
+
+        return $this->sendDiscord($endpoint, [
+            'username' => 'FiveBucket',
+            'embeds' => [[
+                'title' => 'Log alert: '.$rule->name,
+                'description' => $description,
+                'color' => $this->levelColor((string) ($log['level'] ?? 'info')),
+                'fields' => [
+                    ['name' => 'Level', 'value' => (string) ($log['level'] ?? 'info'), 'inline' => true],
+                    ['name' => 'Resource', 'value' => (string) ($log['resource'] ?? 'server'), 'inline' => true],
+                    ['name' => 'Log ID', 'value' => (string) ($log['id'] ?? 'n/a'), 'inline' => true],
+                    [
+                        'name' => 'Triggered log',
+                        'value' => '```'.substr($this->sampleText($log), 0, 900).'```',
+                        'inline' => false,
+                    ],
+                ],
+                'timestamp' => $log['occurredAtIso'] ?? now()->toIso8601String(),
             ]],
         ]);
     }
@@ -194,5 +226,17 @@ class LogAlertDispatcher
             $sample['resource'] ?? null,
             $sample['message'] ?? null,
         ])));
+    }
+
+    private function levelColor(string $level): int
+    {
+        return match (strtolower($level)) {
+            'debug' => 9807270,
+            'info' => 5793266,
+            'warn', 'warning' => 16776960,
+            'error' => 15158332,
+            'fatal', 'critical' => 10181046,
+            default => 5793266,
+        };
     }
 }
