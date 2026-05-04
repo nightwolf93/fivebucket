@@ -27,14 +27,14 @@ export default function BillingUsage({ auth, team, usage, plans }) {
                 <PageHeader
                     eyebrow={team.slug}
                     title="Billing Usage"
-                    description="Track storage, log ingestion, app-delivered bandwidth, deduplicated uploads, and cap your paid overage."
+                    description="Track storage, logs, delivery usage, deduplicated uploads, and cap your paid overage."
                     actions={(
                         <>
                             <Badge variant={team.overageEnabled ? 'green' : 'amber'}>{team.overageEnabled ? 'Overage enabled' : 'Hard cap'}</Badge>
                             <Button asChild variant="secondary" size="sm">
                                 <Link href={route('billing.portal')} method="post" as="button">
                                     <Wallet className="h-3.5 w-3.5" />
-                                    Stripe portal
+                                    Billing portal
                                 </Link>
                             </Button>
                         </>
@@ -46,7 +46,7 @@ export default function BillingUsage({ auth, team, usage, plans }) {
                 <div className="fb-kpis">
                     <KpiCard icon={HardDrive} label="Storage" value={team.storageUsed} detail={`${team.effectiveStorageLimit} effective cap`} />
                     <KpiCard icon={Database} label="Logs this month" value={usage.logsIngested} detail={usage.period.label} tone="muted" />
-                    <KpiCard icon={Signal} label="Bandwidth" value={usage.bandwidth} detail="served through /asset URLs" tone="muted" />
+                    <KpiCard icon={Signal} label="Delivery" value={usage.bandwidth} detail="estimated delivered traffic" tone="muted" />
                     <KpiCard icon={ReceiptText} label="Estimated total" value={usage.estimatedTotal} detail={`${usage.monthlyBase} base · ${usage.estimatedOverage} overage`} />
                 </div>
 
@@ -70,9 +70,9 @@ export default function BillingUsage({ auth, team, usage, plans }) {
                             </div>
 
                             <div className="fb-billing-meter">
-                                <Metric label="Billable overage" value={usage.billableOverage} detail={`${usage.billableOverageGb} billable GB · ${usage.overagePrice}`} />
-                                <Metric label="Deduplicated uploads" value={usage.deduplicated} detail="bytes avoided by content hash detection" />
-                                <Metric label="Estimated app bandwidth" value={usage.bandwidth} detail="only downloads served through FiveBucket routes" />
+                                <Metric label="Billable overage" value={usage.billableOverage} detail={`${usage.billableOverageGb} Go facturables · ${usage.overagePrice}`} />
+                                <Metric label="Deduplicated uploads" value={usage.deduplicated} detail="storage avoided by duplicate detection" />
+                                <Metric label="Estimated delivery" value={usage.bandwidth} detail="downloads delivered by FiveBucket URLs" />
                             </div>
                         </CardContent>
                     </Card>
@@ -91,7 +91,7 @@ export default function BillingUsage({ auth, team, usage, plans }) {
                                         onChange={(event) => overageForm.setData('overage_enabled', event.target.checked)}
                                         className="rounded border-[var(--border)] bg-[var(--bg)] text-emerald-500"
                                     />
-                                    Allow storage overage
+                                    Allow paid storage overage
                                 </label>
 
                                 <label className="fb-label">
@@ -122,7 +122,7 @@ export default function BillingUsage({ auth, team, usage, plans }) {
                     <CardHeader>
                         <div>
                             <CardTitle>Plans</CardTitle>
-                            <p className="fb-panel-subtitle">Upgrade included storage, then use the overage guard to control paid growth.</p>
+                            <p className="fb-panel-subtitle">Upgrade included usage, then use the overage guard to control paid growth.</p>
                         </div>
                         <BarChart3 className="h-4 w-4 fb-dim" />
                     </CardHeader>
@@ -135,9 +135,9 @@ export default function BillingUsage({ auth, team, usage, plans }) {
                                     <thead>
                                         <tr>
                                             <th>Plan</th>
-                                            <th>Included</th>
+                                            <th>Included usage</th>
                                             <th>Base</th>
-                                            <th>Overage</th>
+                                            <th>Extra storage</th>
                                             <th />
                                         </tr>
                                     </thead>
@@ -146,13 +146,25 @@ export default function BillingUsage({ auth, team, usage, plans }) {
                                             <tr key={plan.slug}>
                                                 <td>
                                                     <div className="font-medium text-[var(--fg)]">{plan.name}</div>
-                                                    <div className="fb-mono text-[10px] fb-dim">{plan.slug}</div>
+                                                    <div className="text-[11px] fb-dim">{plan.description}</div>
                                                 </td>
-                                                <td className="fb-mono">{plan.included}</td>
+                                                <td>
+                                                    <div className="flex flex-wrap gap-1.5">
+                                                        {plan.features.slice(0, 3).map((feature) => (
+                                                            <Badge key={feature}>{feature}</Badge>
+                                                        ))}
+                                                    </div>
+                                                </td>
                                                 <td className="fb-mono">{plan.monthly}</td>
                                                 <td className="fb-mono">{plan.overage}</td>
                                                 <td>
-                                                    {plan.stripeReady ? (
+                                                    {plan.isFree ? (
+                                                        <Button asChild variant="secondary" size="sm">
+                                                            <Link href={route('dashboard')}>
+                                                                Current
+                                                            </Link>
+                                                        </Button>
+                                                    ) : plan.checkoutReady ? (
                                                         <Button asChild variant="secondary" size="sm">
                                                             <Link href={route('billing.checkout')} method="post" as="button" data={{ plan: plan.slug }}>
                                                                 Select
@@ -160,7 +172,7 @@ export default function BillingUsage({ auth, team, usage, plans }) {
                                                         </Button>
                                                     ) : (
                                                         <Button type="button" variant="secondary" size="sm" disabled>
-                                                            Pending
+                                                            Soon
                                                         </Button>
                                                     )}
                                                 </td>

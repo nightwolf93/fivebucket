@@ -9,6 +9,7 @@ use App\Models\Team;
 use App\Services\Logs\LogStorage;
 use App\Services\TeamProvisioner;
 use App\Support\ByteFormatter;
+use App\Support\PricingCatalog;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -42,15 +43,7 @@ class BillingController extends Controller
                 ->where('is_active', true)
                 ->orderBy('included_bytes')
                 ->get()
-                ->map(fn (Plan $plan) => [
-                    'name' => $plan->name,
-                    'slug' => $plan->slug,
-                    'included' => ByteFormatter::human($plan->included_bytes),
-                    'includedBytes' => $plan->included_bytes,
-                    'monthly' => $this->money($plan->monthly_price_cents),
-                    'overage' => $this->money($plan->overage_price_cents_per_gb).'/GB',
-                    'stripeReady' => filled($plan->stripe_price_id),
-                ]),
+                ->map(fn (Plan $plan) => PricingCatalog::planFromRecord($plan)),
         ]);
     }
 
@@ -257,17 +250,19 @@ class BillingController extends Controller
 
     private function teamPayload(Team $team): array
     {
+        $plan = $team->plan ? PricingCatalog::planFromRecord($team->plan) : null;
+
         return [
             'id' => $team->id,
             'name' => $team->name,
             'slug' => $team->slug,
             'billingStatus' => $team->billing_status,
-            'plan' => $team->plan ? [
-                'name' => $team->plan->name,
-                'slug' => $team->plan->slug,
-                'included' => ByteFormatter::human($team->plan->included_bytes),
-                'monthly' => $this->money($team->plan->monthly_price_cents),
-                'overage' => $this->money($team->plan->overage_price_cents_per_gb).'/GB',
+            'plan' => $plan ? [
+                'name' => $plan['name'],
+                'slug' => $plan['slug'],
+                'included' => $plan['included'],
+                'monthly' => $plan['monthly'],
+                'overage' => $plan['overage'],
             ] : null,
             'storageUsed' => ByteFormatter::human($team->storage_used_bytes),
             'storageLimit' => ByteFormatter::human($team->storage_limit_bytes),
@@ -315,7 +310,7 @@ class BillingController extends Controller
             'billableOverageBytes' => $billableOverageBytes,
             'billableOverage' => ByteFormatter::human($billableOverageBytes),
             'billableOverageGb' => $billableOverageGb,
-            'overagePrice' => $this->money($overagePriceCents).'/GB',
+            'overagePrice' => $this->money($overagePriceCents).'/Go',
             'monthlyBase' => $this->money($monthlyBaseCents),
             'estimatedOverage' => $this->money($estimatedOverageCents),
             'estimatedTotal' => $this->money($monthlyBaseCents + $estimatedOverageCents),
@@ -329,6 +324,6 @@ class BillingController extends Controller
 
     private function money(int $cents): string
     {
-        return number_format($cents / 100, 2).' EUR';
+        return PricingCatalog::money($cents);
     }
 }

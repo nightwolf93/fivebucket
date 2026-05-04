@@ -31,6 +31,7 @@ export default function Guest({
                 <div className="fb-auth-footer">
                     <div className="flex gap-4">
                         <Link href={route('docs')}>Docs</Link>
+                        <Link href={route('pricing')}>Pricing</Link>
                         <a href="mailto:support@fivebucket.nightwolf.fr">Contact</a>
                     </div>
                     <div className="fb-status-pill active">service online</div>

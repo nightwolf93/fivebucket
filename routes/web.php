@@ -13,6 +13,8 @@ use App\Http\Controllers\MediaController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\RemoteActionController;
 use App\Http\Controllers\TeamSettingsController;
+use App\Models\Plan;
+use App\Support\PricingCatalog;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -34,6 +36,9 @@ Route::get('/', function (): RedirectResponse {
 
 Route::get('/asset/{mediaFile:public_id}', [AssetController::class, 'show'])->name('assets.show');
 Route::get('/docs', fn () => Inertia::render('Docs'))->name('docs');
+Route::get('/pricing', fn () => Inertia::render('Pricing', PricingCatalog::pagePayload(
+    Plan::query()->whereIn('slug', PricingCatalog::slugs())->get()
+)))->name('pricing');
 
 Route::get('/dashboard', [DashboardController::class, 'index'])->middleware(['auth', 'verified'])->name('dashboard');
 

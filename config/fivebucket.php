@@ -7,7 +7,7 @@ return [
     'signed_download_ttl_seconds' => (int) env('FIVEBUCKET_SIGNED_DOWNLOAD_TTL_SECONDS', 900),
     'variant_source_max_bytes' => (int) env('FIVEBUCKET_VARIANT_SOURCE_MAX_BYTES', 31457280),
     'token_secret' => env('FIVEBUCKET_TOKEN_SECRET', env('APP_KEY')),
-    'default_overage_price_cents_per_gb' => (int) env('FIVEBUCKET_OVERAGE_PRICE_CENTS_PER_GB', 0),
+    'default_overage_price_cents_per_gb' => (int) env('FIVEBUCKET_OVERAGE_PRICE_CENTS_PER_GB', 10),
     'logs' => [
         'driver' => env('FIVEBUCKET_LOGS_DRIVER', 'database'),
         'clickhouse' => [
