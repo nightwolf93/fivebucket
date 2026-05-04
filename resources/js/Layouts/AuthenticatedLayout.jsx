@@ -17,6 +17,7 @@ import {
     Shield,
     User,
     Webhook,
+    Workflow,
     X,
 } from 'lucide-react';
 import { useState } from 'react';
@@ -28,6 +29,7 @@ const baseNavigation = [
             { label: 'Dashboard', href: () => route('dashboard'), active: () => route().current('dashboard'), icon: LayoutDashboard },
             { label: 'Logs', href: () => route('logs.index'), active: () => route().current('logs.*'), icon: ScrollText, trail: 'L' },
             { label: 'Alerts', href: () => route('alerts.index'), active: () => route().current('alerts.*'), icon: Bell },
+            { label: 'Actions', href: () => route('actions.index'), active: () => route().current('actions.*'), icon: Workflow },
             { label: 'Media', href: () => route('media.index'), active: () => route().current('media.*'), icon: Boxes },
             { label: 'API Keys', href: () => route('api-keys.index'), active: () => route().current('api-keys.*'), icon: KeyRound },
             { label: 'Billing', href: () => route('billing.usage'), active: () => route().current('billing.*'), icon: CreditCard },

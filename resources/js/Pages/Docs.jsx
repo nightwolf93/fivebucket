@@ -34,6 +34,7 @@ const sections = [
     { id: 'media', label: 'Media API' },
     { id: 'framework-examples', label: 'Frameworks' },
     { id: 'logs', label: 'Logs API' },
+    { id: 'remote-actions', label: 'Remote Actions' },
     { id: 'sdk', label: 'SDK API' },
     { id: 'reference', label: 'Reference' },
     { id: 'errors', label: 'Errors' },
@@ -59,6 +60,9 @@ const endpoints = [
     ['POST', '/api/sdk/report', 'sdk', 'Create a temporary SDK session token.'],
     ['POST', '/api/sdk/heartbeat', 'SDK token', 'Extend an SDK session.'],
     ['POST', '/api/sdk/invalidate', 'SDK token', 'Invalidate an SDK session.'],
+    ['POST', '/api/sdk/actions/poll', 'SDK token', 'Poll queued remote actions from a firewall-safe SDK client.'],
+    ['POST', '/api/sdk/actions/{id}/ack', 'SDK token', 'Mark one action execution as running.'],
+    ['POST', '/api/sdk/actions/{id}/result', 'SDK token', 'Return success/failure and result payload for one action execution.'],
 ];
 
 const luaExports = [
@@ -82,6 +86,10 @@ const luaExports = [
     ['ReportSdk(opts, cb)', 'Create a FiveBucket SDK session.'],
     ['HeartbeatSdk(cb)', 'Refresh the current SDK session.'],
     ['InvalidateSdk(cb)', 'Invalidate the current SDK session.'],
+    ['RegisterAction(key, options, handler)', 'Expose a typed dashboard action that is executed by SDK polling.'],
+    ['UnregisterAction(key)', 'Remove one registered remote action from the SDK registry.'],
+    ['ListActions()', 'Return registered remote action definitions.'],
+    ['PollActions(cb)', 'Manually poll queued dashboard actions.'],
 ];
 
 const examples = {
@@ -104,6 +112,8 @@ set fivebucket_media_rate_window "60"
 set fivebucket_allow_client_capture "0"
 set fivebucket_sdk_report "1"
 set fivebucket_sdk_endpoint "167.71.27.45:30120"
+set fivebucket_sdk_actions "1"
+set fivebucket_sdk_actions_poll_ms "5000"
 
 ensure fivebucket`,
     auth: `Authorization: fbk_xxxxxxxxxxxxxxxxx
@@ -250,6 +260,150 @@ exports.fivebucket:HeartbeatSdk(function(result)
 end)
 
 exports.fivebucket:InvalidateSdk()`,
+    luaRemoteAction: `-- Register a dashboard action from any server-side resource.
+-- FiveBucket never calls your server directly. The SDK polls the dashboard,
+-- executes matching queued actions, then sends the result back.
+exports.fivebucket:RegisterAction('announce_rollback', {
+  label = 'Announce rollback',
+  description = 'Broadcast an upcoming rollback to all players.',
+  category = 'Maintenance',
+  dangerous = true,
+  timeoutSeconds = 45,
+  schema = {
+    fields = {
+      minutes = {
+        type = 'integer',
+        label = 'Minutes',
+        required = true,
+        min = 1,
+        max = 120,
+        default = 5,
+      },
+      reason = {
+        type = 'string',
+        label = 'Reason',
+        max = 200,
+        placeholder = 'database restore',
+      },
+    },
+  },
+}, function(params, context, done)
+  TriggerClientEvent('chat:addMessage', -1, {
+    args = {
+      'Admin',
+      ('Rollback in %s minutes. %s'):format(params.minutes, params.reason or ''),
+    },
+  })
+
+  done({
+    ok = true,
+    result = {
+      announced = true,
+      players = GetNumPlayerIndices(),
+      executionId = context.executionId,
+    },
+  })
+end)`,
+    remoteActionHttp: `POST /api/sdk/actions/poll HTTP/1.1
+Authorization: sdk_xxxxxxxxxxxxxxxxx
+Content-Type: application/json
+
+{
+  "metadata": {
+    "players": 42
+  },
+  "actions": [
+    {
+      "key": "announce_rollback",
+      "label": "Announce rollback",
+      "category": "Maintenance",
+      "dangerous": true,
+      "timeoutSeconds": 45,
+      "schema": {
+        "fields": [
+          { "key": "minutes", "type": "integer", "required": true, "min": 1, "max": 120 },
+          { "key": "reason", "type": "string", "max": 200 }
+        ]
+      }
+    }
+  ]
+}
+
+HTTP/1.1 200 OK
+{
+  "status": "ok",
+  "expiresAt": "2026-05-04T18:30:00.000Z",
+  "actions": [
+    {
+      "id": 1042,
+      "actionKey": "announce_rollback",
+      "params": { "minutes": 5, "reason": "database restore" },
+      "timeoutSeconds": 45
+    }
+  ]
+}`,
+    remoteActionAckResult: `POST /api/sdk/actions/1042/ack HTTP/1.1
+Authorization: sdk_xxxxxxxxxxxxxxxxx
+
+HTTP/1.1 200 OK
+{ "status": "ok" }
+
+POST /api/sdk/actions/1042/result HTTP/1.1
+Authorization: sdk_xxxxxxxxxxxxxxxxx
+Content-Type: application/json
+
+{
+  "ok": true,
+  "result": {
+    "announced": true,
+    "players": 42
+  }
+}`,
+    jsSdkRemoteActions: `const report = await fivebucket.sdkReport({
+  endpoint: 'prod-rp-1',
+  resourceName: 'admin_tools',
+  actions: [{
+    key: 'announce_rollback',
+    label: 'Announce rollback',
+    category: 'Maintenance',
+    dangerous: true,
+    timeoutSeconds: 45,
+    schema: {
+      fields: [
+        { key: 'minutes', type: 'integer', required: true, min: 1, max: 120 },
+        { key: 'reason', type: 'string', max: 200 },
+      ],
+    },
+  }],
+});
+
+const token = report.token;
+
+setInterval(async () => {
+  const pending = await fivebucket.sdkPollActions(token, {
+    metadata: { players: GetNumPlayerIndices() },
+  });
+
+  for (const execution of pending.actions) {
+    await fivebucket.sdkAckAction(token, execution.id);
+
+    try {
+      emit('chat:addMessage', -1, {
+        args: ['Admin', 'Rollback in ' + execution.params.minutes + ' minutes.'],
+      });
+
+      await fivebucket.sdkCompleteAction(token, execution.id, {
+        ok: true,
+        result: { announced: true },
+      });
+    } catch (error) {
+      await fivebucket.sdkCompleteAction(token, execution.id, {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+}, 5000);`,
     jsServerExports: `// server.js from another FiveM resource
 RegisterCommand('fb_js_log', (source, args) => {
   exports['fivebucket'].Info(
@@ -677,6 +831,7 @@ function DocsPage({ dashboard = false }) {
                         <Example title="Upload resource file" code={examples.luaResourceFile} language="lua" />
                         <Example title="List / get / delete media" code={examples.luaListDelete} language="lua" />
                         <Example title="SDK report / heartbeat" code={examples.luaSdk} language="lua" />
+                        <Example title="Register dashboard action" code={examples.luaRemoteAction} language="lua" />
                     </Grid>
                 </Section>
 
@@ -687,6 +842,7 @@ function DocsPage({ dashboard = false }) {
                     <Grid>
                         <Example title="Client TypeScript minimal" code={examples.jsSdkBasic} language="js" />
                         <Example title="Upload prive + signed variant" code={examples.jsSdkPrivateUpload} language="js" />
+                        <Example title="Remote actions polling" code={examples.jsSdkRemoteActions} language="js" />
                     </Grid>
                     <Callout>
                         Le SDK JS/TS se trouve dans `packages/fivebucket-js`. Il est pret a compiler avec `npm run build` et n'ajoute aucune dependance runtime autre que `fetch`.
@@ -761,9 +917,46 @@ function DocsPage({ dashboard = false }) {
                     />
                 </Section>
 
+                <Section id="remote-actions" icon={Workflow} title="Remote Actions">
+                    <p className="text-[12px] leading-6 fb-muted">
+                        Les Remote Actions permettent de creer des boutons/actions dans le dashboard pour piloter une resource SDK active: annonce serveur, maintenance, moderation, refresh cache, rollback warning, etc. Le modele est firewall-safe: FiveBucket ne fait jamais de requete vers votre serveur FiveM. La resource SDK declare ses actions, poll `/api/sdk/actions/poll`, execute localement les callbacks, puis renvoie `ack` et `result`.
+                    </p>
+                    <div className="grid gap-3 md:grid-cols-3">
+                        <Step number="1" title="Declare">
+                            La resource envoie `actions` dans `ReportSdk`, `HeartbeatSdk` ou `PollActions`. Chaque action contient une cle stable, un label, une categorie et un schema de parametres.
+                        </Step>
+                        <Step number="2" title="Queue">
+                            Un utilisateur choisit une action dans le dashboard. FiveBucket cree une execution `queued` avec les parametres valides et un timeout.
+                        </Step>
+                        <Step number="3" title="Poll + result">
+                            Le SDK lit les executions en attente, appelle le handler local, puis poste le resultat. Le dashboard affiche `queued`, `delivered`, `running`, `succeeded`, `failed`, `timeout` ou `cancelled`.
+                        </Step>
+                    </div>
+                    <Endpoint method="POST" path="/api/sdk/actions/poll" description="SDK-only polling endpoint. Extends the SDK session and returns up to 10 queued actions." />
+                    <Endpoint method="POST" path="/api/sdk/actions/{id}/ack" description="Mark the execution as running before calling the local handler." />
+                    <Endpoint method="POST" path="/api/sdk/actions/{id}/result" description="Return `{ ok, result, error }` after the handler completes or fails." />
+                    <Grid>
+                        <Example title="Lua action callback" code={examples.luaRemoteAction} language="lua" />
+                        <Example title="Raw poll response" code={examples.remoteActionHttp} language="http" />
+                        <Example title="Ack and result" code={examples.remoteActionAckResult} language="http" />
+                        <Example title="JS/TS polling loop" code={examples.jsSdkRemoteActions} language="js" />
+                    </Grid>
+                    <ReferenceTable
+                        columns={['Field', 'Type', 'Usage']}
+                        rows={[
+                            ['key', 'string', 'Stable action identifier, for example `announce_rollback`.'],
+                            ['schema.fields', 'array/object', 'Parameter definition. Supported types: `string`, `text`, `integer`, `number`, `boolean`, `select`, `multiselect`, `json`, `object`, `player`, `datetime`.'],
+                            ['dangerous', 'boolean', 'Shows a danger state in the dashboard.'],
+                            ['requiresConfirmation', 'boolean', 'Forces a dashboard confirmation before queueing. Defaults to true when `dangerous=true`.'],
+                            ['timeoutSeconds', 'number', 'SDK handler timeout between 5 and 600 seconds.'],
+                            ['result', 'object', 'Returned by the SDK and stored on the execution history.'],
+                        ]}
+                    />
+                </Section>
+
                 <Section id="sdk" icon={RadioTower} title="SDK Session API">
                     <p className="text-[12px] leading-6 fb-muted">
-                        Le SDK session sert a identifier une resource active et a maintenir un heartbeat. Le package Lua fait le `report` automatiquement au demarrage si `fivebucket_sdk_report=1`, puis renouvelle la session via `HeartbeatSdk`.
+                        Le SDK session sert a identifier une resource active, maintenir un heartbeat et exposer ses Remote Actions. Le package Lua fait le `report` automatiquement au demarrage si `fivebucket_sdk_report=1`, puis renouvelle la session via `HeartbeatSdk` et le polling d'actions.
                     </p>
                     <Grid>
                         <Example title="Raw SDK report request" code={examples.sdkReport} language="http" />

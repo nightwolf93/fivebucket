@@ -18,7 +18,7 @@ export class FiveBucketClient {
             Accept: 'application/json',
             ...options.headers,
         };
-        if (this.apiKey) {
+        if (this.apiKey && !headers.Authorization) {
             headers.Authorization = this.apiKey;
         }
         let body;
@@ -89,14 +89,32 @@ export class FiveBucketClient {
             body,
         });
     }
-    async sdkHeartbeat(token) {
+    async sdkHeartbeat(token, options = {}) {
         return this.request('POST', '/api/sdk/heartbeat', {
             headers: { Authorization: token },
+            body: options,
         });
     }
     async sdkInvalidate(token) {
         return this.request('POST', '/api/sdk/invalidate', {
             headers: { Authorization: token },
+        });
+    }
+    async sdkPollActions(token, options = {}) {
+        return this.request('POST', '/api/sdk/actions/poll', {
+            headers: { Authorization: token },
+            body: options,
+        });
+    }
+    async sdkAckAction(token, executionId) {
+        return this.request('POST', `/api/sdk/actions/${encodeURIComponent(String(executionId))}/ack`, {
+            headers: { Authorization: token },
+        });
+    }
+    async sdkCompleteAction(token, executionId, payload) {
+        return this.request('POST', `/api/sdk/actions/${encodeURIComponent(String(executionId))}/result`, {
+            headers: { Authorization: token },
+            body: payload,
         });
     }
 }

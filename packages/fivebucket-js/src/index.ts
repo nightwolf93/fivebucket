@@ -51,6 +51,71 @@ export interface SdkReportOptions {
   resourceName?: string;
   version?: string;
   metadata?: Record<string, unknown>;
+  actions?: RemoteActionDefinition[];
+}
+
+export type RemoteActionFieldType =
+  | 'string'
+  | 'text'
+  | 'number'
+  | 'integer'
+  | 'boolean'
+  | 'select'
+  | 'multiselect'
+  | 'json'
+  | 'object'
+  | 'player'
+  | 'datetime';
+
+export interface RemoteActionField {
+  key: string;
+  type?: RemoteActionFieldType;
+  label?: string;
+  description?: string;
+  required?: boolean;
+  placeholder?: string;
+  min?: number;
+  max?: number;
+  default?: unknown;
+  options?: Array<string | { value: string | number | boolean; label?: string }>;
+  secret?: boolean;
+}
+
+export interface RemoteActionDefinition {
+  key: string;
+  label?: string;
+  description?: string;
+  category?: string;
+  dangerous?: boolean;
+  requiresConfirmation?: boolean;
+  timeoutSeconds?: number;
+  schema?: { fields?: RemoteActionField[] | Record<string, RemoteActionField | RemoteActionFieldType> };
+  params?: RemoteActionField[] | Record<string, RemoteActionField | RemoteActionFieldType>;
+  metadata?: Record<string, unknown>;
+}
+
+export interface SdkHeartbeatOptions {
+  actions?: RemoteActionDefinition[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface SdkPollActionsOptions extends SdkHeartbeatOptions {}
+
+export interface RemoteActionExecution {
+  id: number;
+  actionKey: string;
+  label?: string;
+  params: Record<string, unknown>;
+  timeoutSeconds: number;
+  requestedAt?: string;
+  expiresAt?: string;
+}
+
+export interface RemoteActionResult {
+  ok: boolean;
+  result?: Record<string, unknown> | unknown;
+  data?: Record<string, unknown> | unknown;
+  error?: string;
 }
 
 export class FiveBucketClient {
@@ -82,7 +147,7 @@ export class FiveBucketClient {
       ...options.headers,
     };
 
-    if (this.apiKey) {
+    if (this.apiKey && !headers.Authorization) {
       headers.Authorization = this.apiKey;
     }
 
@@ -188,15 +253,36 @@ export class FiveBucketClient {
     });
   }
 
-  async sdkHeartbeat(token: string) {
-    return this.request<{ message: string; expiresAt?: string }>('POST', '/api/sdk/heartbeat', {
+  async sdkHeartbeat(token: string, options: SdkHeartbeatOptions = {}) {
+    return this.request<{ message: string; expiresAt?: string; pendingActions?: number }>('POST', '/api/sdk/heartbeat', {
       headers: { Authorization: token },
+      body: options,
     });
   }
 
   async sdkInvalidate(token: string) {
     return this.request<{ message: string }>('POST', '/api/sdk/invalidate', {
       headers: { Authorization: token },
+    });
+  }
+
+  async sdkPollActions(token: string, options: SdkPollActionsOptions = {}) {
+    return this.request<{ status: 'ok'; expiresAt?: string; actions: RemoteActionExecution[] }>('POST', '/api/sdk/actions/poll', {
+      headers: { Authorization: token },
+      body: options,
+    });
+  }
+
+  async sdkAckAction(token: string, executionId: string | number) {
+    return this.request<{ status: 'ok' }>('POST', `/api/sdk/actions/${encodeURIComponent(String(executionId))}/ack`, {
+      headers: { Authorization: token },
+    });
+  }
+
+  async sdkCompleteAction(token: string, executionId: string | number, payload: RemoteActionResult) {
+    return this.request<{ status: 'ok' }>('POST', `/api/sdk/actions/${encodeURIComponent(String(executionId))}/result`, {
+      headers: { Authorization: token },
+      body: payload,
     });
   }
 }

@@ -95,6 +95,21 @@ class Team extends Model
         return $this->hasMany(UsageRecord::class);
     }
 
+    public function sdkSessions(): HasMany
+    {
+        return $this->hasMany(SdkSession::class);
+    }
+
+    public function sdkActions(): HasMany
+    {
+        return $this->hasMany(SdkAction::class);
+    }
+
+    public function sdkActionExecutions(): HasMany
+    {
+        return $this->hasMany(SdkActionExecution::class);
+    }
+
     public function remainingStorageBytes(): int
     {
         return max(0, $this->effectiveStorageLimitBytes() - $this->storage_used_bytes);

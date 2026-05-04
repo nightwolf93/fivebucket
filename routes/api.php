@@ -63,5 +63,8 @@ Route::post('/logs', [LogController::class, 'ingestLegacy'])->middleware('fivebu
 Route::post('/sdk/report', [SdkController::class, 'report'])->middleware('fivebucket.token:sdk');
 Route::post('/sdk/heartbeat', [SdkController::class, 'heartbeat']);
 Route::post('/sdk/invalidate', [SdkController::class, 'invalidate']);
+Route::post('/sdk/actions/poll', [SdkController::class, 'pollActions']);
+Route::post('/sdk/actions/{execution}/ack', [SdkController::class, 'ackAction']);
+Route::post('/sdk/actions/{execution}/result', [SdkController::class, 'completeAction']);
 
 Route::post('/stripe/webhook', [BillingController::class, 'webhook']);

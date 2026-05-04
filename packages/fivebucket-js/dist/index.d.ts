@@ -45,6 +45,59 @@ export interface SdkReportOptions {
     resourceName?: string;
     version?: string;
     metadata?: Record<string, unknown>;
+    actions?: RemoteActionDefinition[];
+}
+export type RemoteActionFieldType = 'string' | 'text' | 'number' | 'integer' | 'boolean' | 'select' | 'multiselect' | 'json' | 'object' | 'player' | 'datetime';
+export interface RemoteActionField {
+    key: string;
+    type?: RemoteActionFieldType;
+    label?: string;
+    description?: string;
+    required?: boolean;
+    placeholder?: string;
+    min?: number;
+    max?: number;
+    default?: unknown;
+    options?: Array<string | {
+        value: string | number | boolean;
+        label?: string;
+    }>;
+    secret?: boolean;
+}
+export interface RemoteActionDefinition {
+    key: string;
+    label?: string;
+    description?: string;
+    category?: string;
+    dangerous?: boolean;
+    requiresConfirmation?: boolean;
+    timeoutSeconds?: number;
+    schema?: {
+        fields?: RemoteActionField[] | Record<string, RemoteActionField | RemoteActionFieldType>;
+    };
+    params?: RemoteActionField[] | Record<string, RemoteActionField | RemoteActionFieldType>;
+    metadata?: Record<string, unknown>;
+}
+export interface SdkHeartbeatOptions {
+    actions?: RemoteActionDefinition[];
+    metadata?: Record<string, unknown>;
+}
+export interface SdkPollActionsOptions extends SdkHeartbeatOptions {
+}
+export interface RemoteActionExecution {
+    id: number;
+    actionKey: string;
+    label?: string;
+    params: Record<string, unknown>;
+    timeoutSeconds: number;
+    requestedAt?: string;
+    expiresAt?: string;
+}
+export interface RemoteActionResult {
+    ok: boolean;
+    result?: Record<string, unknown> | unknown;
+    data?: Record<string, unknown> | unknown;
+    error?: string;
 }
 export declare class FiveBucketClient {
     private readonly baseUrl;
@@ -121,12 +174,24 @@ export declare class FiveBucketClient {
         token: string;
         expiresAt: string;
     }>;
-    sdkHeartbeat(token: string): Promise<{
+    sdkHeartbeat(token: string, options?: SdkHeartbeatOptions): Promise<{
         message: string;
         expiresAt?: string | undefined;
+        pendingActions?: number | undefined;
     }>;
     sdkInvalidate(token: string): Promise<{
         message: string;
+    }>;
+    sdkPollActions(token: string, options?: SdkPollActionsOptions): Promise<{
+        status: 'ok';
+        expiresAt?: string | undefined;
+        actions: RemoteActionExecution[];
+    }>;
+    sdkAckAction(token: string, executionId: string | number): Promise<{
+        status: 'ok';
+    }>;
+    sdkCompleteAction(token: string, executionId: string | number, payload: RemoteActionResult): Promise<{
+        status: 'ok';
     }>;
 }
 export declare class FiveBucketError extends Error {

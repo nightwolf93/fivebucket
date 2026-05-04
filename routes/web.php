@@ -11,6 +11,7 @@ use App\Http\Controllers\LogSavedViewController;
 use App\Http\Controllers\LogWebhookEndpointController;
 use App\Http\Controllers\MediaController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\RemoteActionController;
 use App\Http\Controllers\TeamSettingsController;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Route;
@@ -46,6 +47,9 @@ Route::middleware('auth')->group(function () {
     Route::patch('/media/{mediaFile}', [MediaController::class, 'update'])->name('media.update');
     Route::get('/media/{mediaFile}/signed-url', [MediaController::class, 'signedUrl'])->name('media.signed-url');
     Route::delete('/media/{mediaFile}', [MediaController::class, 'destroy'])->name('media.destroy');
+    Route::get('/actions', [RemoteActionController::class, 'index'])->name('actions.index');
+    Route::post('/actions', [RemoteActionController::class, 'store'])->name('actions.store');
+    Route::delete('/actions/{execution}', [RemoteActionController::class, 'cancel'])->name('actions.cancel');
     Route::get('/logs', [LogDashboardController::class, 'index'])->name('logs.index');
     Route::get('/logs/export', [LogDashboardController::class, 'export'])->name('logs.export');
     Route::get('/logs/metadata/suggestions', [LogDashboardController::class, 'metadataSuggestions'])->name('logs.metadata-suggestions');

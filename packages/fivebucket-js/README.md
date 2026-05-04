@@ -102,6 +102,58 @@ RegisterCommand('admin_audit', async (source, args) => {
 }, true);
 ```
 
+## Remote Actions
+
+Remote actions work behind a firewall because FiveBucket never calls your game server. The SDK reports the actions it supports, polls FiveBucket for queued executions, then posts an ack and final result.
+
+```ts
+const report = await fivebucket.sdkReport({
+  endpoint: 'prod-rp-1',
+  resourceName: 'admin_tools',
+  actions: [{
+    key: 'announce_rollback',
+    label: 'Announce rollback',
+    category: 'Maintenance',
+    dangerous: true,
+    timeoutSeconds: 45,
+    schema: {
+      fields: [
+        { key: 'minutes', type: 'integer', required: true, min: 1, max: 120 },
+        { key: 'reason', type: 'string', max: 200 },
+      ],
+    },
+  }],
+});
+
+const token = report.token;
+
+setInterval(async () => {
+  const pending = await fivebucket.sdkPollActions(token, {
+    metadata: { players: GetNumPlayerIndices() },
+  });
+
+  for (const execution of pending.actions) {
+    await fivebucket.sdkAckAction(token, execution.id);
+
+    try {
+      emit('chat:addMessage', -1, {
+        args: ['Admin', `Rollback in ${execution.params.minutes} minutes.`],
+      });
+
+      await fivebucket.sdkCompleteAction(token, execution.id, {
+        ok: true,
+        result: { announced: true },
+      });
+    } catch (error) {
+      await fivebucket.sdkCompleteAction(token, execution.id, {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+}, 5000);
+```
+
 ## API Surface
 
 - `request(method, path, options)`
@@ -116,5 +168,8 @@ RegisterCommand('admin_audit', async (source, args) => {
 - `logs(entries)`
 - `discordLog(payload)`
 - `sdkReport(options)`
-- `sdkHeartbeat(token)`
+- `sdkHeartbeat(token, options)`
+- `sdkPollActions(token, options)`
+- `sdkAckAction(token, executionId)`
+- `sdkCompleteAction(token, executionId, payload)`
 - `sdkInvalidate(token)`

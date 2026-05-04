@@ -25,6 +25,7 @@ class ClientManagementTest extends TestCase
         $this->actingAs($user)->get('/dashboard')->assertOk();
         $this->actingAs($user)->get('/api-keys')->assertOk();
         $this->actingAs($user)->get('/media')->assertOk();
+        $this->actingAs($user)->get('/actions')->assertOk();
         $this->actingAs($user)->get('/logs')->assertOk();
         $this->actingAs($user)->get('/settings')->assertOk();
         $this->actingAs($user)->get('/billing/usage')->assertOk();
